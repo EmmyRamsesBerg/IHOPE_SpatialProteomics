@@ -14,40 +14,39 @@ Myeloid/APC: CD11c+ AND CD3e− AND CD20−
 Remaining immune cells: labeled Immune_Unclassified
 
 Type assignment non-immune:
-Endothelial: CD31+ AND (CD34+ OR LYVE1+) # TODO consider looser rule CD31+ AND Vimentin-
+Endothelial: CD31+ AND (CD34+ OR LYVE1+) 
 Stromal: Vimentin+ OR CollagenIV+ AND LYVE1-
 Non-Immune_Unclassified: not meeting these criteria
 
 Subtype assignment within T-cells:
 Helper T: CD4+ AND CD8−
 Cytotoxic T: CD8+ AND CD4−
-Treg putative: CD4+ AND FOXP3+ #TODO discuss putative
-TfH-like: CD4+ AND PD-1+ AND ICOS+ #TODO Discuss putative, PD-1 sliding scale, but if in Bc follicle it is TfH
-Naïve T: CD45RA+ #TODO is this feasible or will the definitions get messed up
-Tissue-resident T: CD45RO+ #TODO is this feasible or will the definitions get messed up
-Stem-like memory T (exhausted?): TCF-1+, CD27+, CD45RA+, CD45RO- #TODO discuss
-Th17-like: CD4+, CCR6+ # TODO discuss gut marker
+Treg putative: CD4+ AND FOXP3+ 
+TfH-like: CD4+ AND PD-1+ AND ICOS+ 
+Naïve T: CD45RA+ 
+Tissue-resident T: CD45RO+ 
+Stem-like memory T (exhausted?): TCF-1+, CD27+, CD45RA+, CD45RO- 
+Th17-like: CD4+, CCR6+ 
 T_Unclassified: not meeting these criteria
 
 Subtype assignment within B-cells:
 Memory B: CD20+ AND CD27+
-Plasma-like: CD20− AND CD79a+ #TODO make sure no "low" left
-GC-like B: CD20+ AND CD38+ #TODO discuss CD27
-Follicular-like B: CD20+ AND CD21+ #TODO discuss
-Activated B: CD20+ OR CD79a+ AND CD40+ AND CD69+ OR HLA-DR #TODO include CD79a?
+Plasma-like: CD20− AND CD79a+ 
+GC-like B: CD20+ AND CD38+ 
+Follicular-like B: CD20+ AND CD21+ 
+Activated B: CD20+ OR CD79a+ AND CD40+ AND CD69+ OR HLA-DR 
 B_Unclassified: not meeting these criteria
 
 Subtype assignment within Myeloid/APC:
-Monocyte/Macrophage: CD14+ #TODO optional CD68+ or CD163+, include?
-cDC1: CD141+ AND CD1c− AND CD68- AND CD163- #TODO optional HLA-DR
-cDC2: CD1c+ AND CD141− AND CD68- AND CD163- #TODO optional HLA-DR
+Monocyte/Macrophage: CD14+ 
+cDC1: CD141+ AND CD1c− AND CD68- AND CD163- 
+cDC2: CD1c+ AND CD141− AND CD68- AND CD163- 
 Myeloid_Unclassified: not meeting these criteria
 
 Subtype assignment within non-immune branch:
 Endothelial (blood): CD31+ AND CD34+
-Lymphatic Endothelial: LYVE1+ #TODO discuss accuracy
-Fibroblast/stromal: Vimentin+ AND CollagenIV+ AND LYVE1− #TODO discuss Collagen, move to separate Bas.Mem.?
-# TODO Also consider using Vimentin+ AND CD31- as a simple rule to exclude endothelium?
+Lymphatic Endothelial: LYVE1+ 
+Fibroblast/stromal: Vimentin+ AND CollagenIV+ AND LYVE1− 
 FDC: CD21+ AND CXCL13+
 Stromal_Unclassified: not meeting these criteria
 
@@ -55,7 +54,6 @@ Note:
 Each new subtype on a given level is independent. This means that overlapping cases  will be assigned to
 the first rule defined. Order matters where markers co-express.
 Only cells meeting all criteria are labeled as a type or subtype. Otherwise saved as "unclassified" on that level.
-#TODO double-check if we want Treg/TfH to override helper T etc
     """
 
     # Initialize as unclassified
@@ -84,7 +82,7 @@ Only cells meeting all criteria are labeled as a type or subtype. Otherwise save
 
     tcell = immune & adata.obs['CD3e_pos'] & ~adata.obs['CD20_pos'] & ~adata.obs['CD79a_pos']
     bcell = immune & (adata.obs['CD20_pos'] | adata.obs['CD79a_pos']) & ~adata.obs['CD3e_pos']
-    myeloid = immune & adata.obs['CD11c_pos'] & ~adata.obs['CD3e_pos'] & ~adata.obs['CD20_pos'] #changed this
+    myeloid = immune & adata.obs['CD11c_pos'] & ~adata.obs['CD3e_pos'] & ~adata.obs['CD20_pos'] 
 
     immune_remaining = immune & ~(tcell | bcell | myeloid)
 
@@ -102,7 +100,6 @@ Only cells meeting all criteria are labeled as a type or subtype. Otherwise save
     non_immune = adata.obs['branch'] == 'Non-Immune'
 
     endothelial = non_immune & (adata.obs['CD31_pos'] | adata.obs['CD34_pos'] | adata.obs['LYVE1_pos'])
-    # TODO consider looser rule CD31+ AND NOT Vimentin+
     stromal = non_immune & (adata.obs['Vimentin_pos'] | adata.obs['Collagen IV_pos']) & ~adata.obs['LYVE1_pos'] & ~adata.obs['CD31_pos']
     non_immune_remaining = non_immune & ~(endothelial | stromal)
 
@@ -145,7 +142,7 @@ Only cells meeting all criteria are labeled as a type or subtype. Otherwise save
 
     adata.obs.loc[b & ((adata.obs['CD20_pos'] | adata.obs['CD79a_pos']) &
                        (adata.obs['CD40_pos'] & adata.obs['CD69_pos'] | adata.obs[
-                           'HLA-DR_pos'])), 'subtype'] = 'Activated_B' # TODO check so not too much ends up here..
+                           'HLA-DR_pos'])), 'subtype'] = 'Activated_B' 
     adata.obs.loc[b & adata.obs['CD20_pos'] & adata.obs['CD38_pos'], 'subtype'] = 'GC_like_B'
     adata.obs.loc[b & adata.obs['CD20_pos'] & adata.obs['CD21_pos'], 'subtype'] = 'Follicular_like_B'
     adata.obs.loc[b & adata.obs['CD20_pos'] & adata.obs['CD27_pos'], 'subtype'] = 'Memory_B'
