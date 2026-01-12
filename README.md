@@ -1,4 +1,4 @@
-# IHOPE_SpatialProteomics
+# IHOPE_SpatialProteomics DRAFT
 Workflow to load spatial proteomics data from .csv table, filter and normalize, and visualize cell types and marker intensities. 
 The workflow contains the following steps:
 
