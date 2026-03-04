@@ -14,4 +14,3 @@ dependencies:
   - python-igraph
   - h5py
   - anndata
-prefix: /Users/magnusberg/.miniconda3/envs/ihopespatial
