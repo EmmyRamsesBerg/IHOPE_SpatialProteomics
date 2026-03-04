@@ -1,0 +1,17 @@
+name: ihopespatial
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - scanpy
+  - numba
+  - llvmlite
+  - pandas
+  - scipy
+  - scikit-learn
+  - notebook
+  - leidenalg
+  - python-igraph
+  - h5py
+  - anndata
+prefix: /Users/magnusberg/.miniconda3/envs/ihopespatial
