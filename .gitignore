@@ -1,0 +1,23 @@
+# Python virtual environments
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter Notebook auto-files
+.ipynb_checkpoints/
+
+# macOS junk
+.DS_Store
+
+# Environment variables
+.env
+
+# PyCharm project settings
+.idea/
+
+# Large folders, might add results later to sync?
+data/
+results/
