@@ -18,6 +18,8 @@ __pycache__/
 # PyCharm project settings
 .idea/
 
-# Large folders, might add results later to sync?
-data/
-results/
+# Large folders, empty placeholders for cloning
+data/*
+results/*
+!data/.gitkeep
+!results/.gitkeep
