@@ -334,60 +334,18 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
     total_cells = adata.n_obs
     print(f"Total cells: {total_cells}\n")
 
-    print("Level 1 — Lineage (type):")
-    for col in ["type_B", "type_T", "type_NK", "type_unclassified"]:
-        count = adata.obs[col].sum()
-        print(f"  {col}: {count} ({100 * count / total_cells:.1f}%)")
-    print("")
+    for level_prefix in ["type_", "intermediate_", "subtype_"]:
+        level_cols = [c for c in adata.obs.columns if c.startswith(level_prefix)]
+        if not level_cols:
+            continue
 
-    print("Level 2 — Intermediate states:")
+        print(f"Level — {level_prefix[:-1]}:")
+        for col in level_cols:
+            count = int(adata.obs[col].sum())
+            pct_total = 100 * count / total_cells if total_cells else 0
+            print(f"  {col}: {count} ({pct_total:.1f}% of total)")
+        print("")
 
-    t_total = t.sum()
-    print("  T cells:")
-    for col in [
-        "intermediate_CD4_T",
-        "intermediate_CD8_T",
-        "intermediate_T_naive",
-        "intermediate_T_memory",
-    ]:
-        count = adata.obs[col].sum()
-        print(
-            f"    {col}: {count} "
-            f"({100 * count / total_cells:.1f}% of total, "
-            f"{100 * count / t_total if t_total else 0:.1f}% of T)"
-        )
-
-    b_total = b.sum()
-    print("  B cells:")
-    for col in ["intermediate_B_naive", "intermediate_B_memory"]:
-        count = adata.obs[col].sum()
-        print(
-            f"    {col}: {count} "
-            f"({100 * count / total_cells:.1f}% of total, "
-            f"{100 * count / b_total if b_total else 0:.1f}% of B)"
-        )
-    print("")
-
-    print("Level 3 — Subtypes:")
-    print("  B cell subtypes:")
-    for col in ["subtype_B_GC", "subtype_B_plasmablast", "subtype_B_unassigned"]:
-        count = adata.obs[col].sum()
-        print(
-            f"    {col}: {count} "
-            f"({100 * count / total_cells:.1f}% of total, "
-            f"{100 * count / b_total if b_total else 0:.1f}% of B)"
-        )
-
-    print("  T cell subtypes:")
-    for col in t_subtypes:
-        count = adata.obs[col].sum()
-        print(
-            f"    {col}: {count} "
-            f"({100 * count / total_cells:.1f}% of total, "
-            f"{100 * count / t_total if t_total else 0:.1f}% of T)"
-        )
-
-    print("")
     return adata
 
 def add_TfH_like_cells(
