@@ -172,18 +172,18 @@ def spatial_celltype_plot(
     ax.grid(False)
     ax.axis("off")
 
-    for ct in valid_cts:
-        # Plot all cells faint grey first
-        plt.scatter(
-            adata.obs[x_coord],
-            adata.obs[y_coord],
-            c="lightgrey",
-            s=size * 0.6,  # slightly smaller
-            alpha=0.3,
-            linewidths=0
-        )
+    # Plot all cells faint grey once (background)
+    plt.scatter(
+        adata.obs[x_coord],
+        adata.obs[y_coord],
+        c="lightgrey",
+        s=size * 0.6,
+        alpha=0.3,
+        linewidths=0
+    )
 
-        # Highlight the current cell type in its color
+    # Overlay each cell type in color
+    for ct in valid_cts:
         mask = adata.obs[ct].astype(bool)
         plt.scatter(
             adata.obs.loc[mask, x_coord],
@@ -194,6 +194,7 @@ def spatial_celltype_plot(
             label=ct,
             linewidths=0,
         )
+
     plt.gca().invert_yaxis()  # match image orientation if needed
     plt.legend(markerscale=2, bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
