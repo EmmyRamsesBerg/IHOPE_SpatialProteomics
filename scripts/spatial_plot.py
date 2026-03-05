@@ -151,9 +151,13 @@ def spatial_celltype_plot(
     if not valid_cts:
         raise ValueError("No cell types meet min_cells threshold.")
 
+    # Count cells for each valid cell type
+    ct_counts = {ct: adata.obs[ct].sum() for ct in valid_cts}
+
     # Ensure unassigned types are plotted first
     unassigned = [ct for ct in valid_cts if ct.endswith("unassigned")]
     assigned = [ct for ct in valid_cts if not ct.endswith("unassigned")]
+    assigned = sorted(assigned, key=lambda ct: ct_counts[ct], reverse=True) #Order from most abundant
     valid_cts = unassigned + assigned
 
     # Assign colors
