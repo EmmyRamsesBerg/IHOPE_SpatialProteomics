@@ -45,7 +45,7 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
 
     # Stromal cells: Vimentin+ OR Collagen IV+, excluding CD45, LYVE1, CD31
     adata.obs["type_Stromal"] = (
-            (adata.obs["Vimentin_pos"] | adata.obs["Collagen_IV_pos"])
+            (adata.obs["Vimentin_pos"] | adata.obs["Collagen IV_pos"])
             & ~adata.obs["CD45_pos"]
             & ~adata.obs["LYVE1_pos"]
             & ~adata.obs["CD31_pos"]
@@ -294,7 +294,7 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
 
     # Basement membrane: Collagen IV+, exclude CD31/CD45
     adata.obs["subtype_Basement_Membrane"] = (
-            adata.obs["Collagen_IV_pos"]
+            adata.obs["Collagen IV_pos"]
             & ~adata.obs["CD31_pos"]
             & ~adata.obs["CD45_pos"]
     )

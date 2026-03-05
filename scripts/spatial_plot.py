@@ -151,12 +151,26 @@ def spatial_celltype_plot(
     if not valid_cts:
         raise ValueError("No cell types meet min_cells threshold.")
 
+    # Ensure unassigned types are plotted first
+    unassigned = [ct for ct in valid_cts if ct.endswith("unassigned")]
+    assigned = [ct for ct in valid_cts if not ct.endswith("unassigned")]
+    valid_cts = unassigned + assigned
+
     # Assign colors
     if palette is None:
         colors = sns.color_palette("tab20", len(valid_cts))
         palette = dict(zip(valid_cts, colors))
 
-    plt.figure(figsize=figsize)
+        # Override unassigned colors
+        for ct in valid_cts:
+            if ct.endswith("unassigned"):
+                palette[ct] = (0.85, 0.85, 0.85)  # light grey
+
+    plt.figure(figsize=figsize, facecolor="white")
+    ax = plt.gca()
+    ax.set_facecolor("white")
+    ax.grid(False)
+    ax.axis("off")
 
     # Plot each cell type separately
     for ct in valid_cts:
@@ -171,8 +185,7 @@ def spatial_celltype_plot(
             linewidths=0,
         )
 
-    plt.xlabel(x_coord)
-    plt.ylabel(y_coord)
+
     plt.gca().invert_yaxis()  # match image orientation if needed
     plt.legend(markerscale=2, bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
