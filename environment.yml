@@ -4,6 +4,9 @@ channels:
   - defaults
 dependencies:
   - python=3.10
+  - pip
+  - pip:
+      - git+https://github.com/prabhakarlab/Banksy_py.git
   - scanpy
   - numba
   - llvmlite
