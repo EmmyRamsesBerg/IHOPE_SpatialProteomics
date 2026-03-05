@@ -34,10 +34,10 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
         & ~adata.obs["CD20_pos"]
     )
 
-    # Myeloid cells: CD45+ AND (HLA-DR+ OR CD11+) excluding T/B
+    # Myeloid cells: CD45+ AND (HLA-DR+ OR CD11c+) excluding T/B
     adata.obs["type_Myeloid"] = (
             adata.obs["CD45_pos"]
-            & (adata.obs["HLA-DR_pos"] | adata.obs["CD11_pos"])
+            & (adata.obs["HLA-DR_pos"] | adata.obs["CD11c_pos"])
             & ~adata.obs["CD3e_pos"]
             & ~adata.obs["CD20_pos"]
             & ~adata.obs["CD79a_pos"]
