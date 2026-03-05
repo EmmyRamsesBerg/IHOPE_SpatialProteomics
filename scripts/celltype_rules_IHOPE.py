@@ -34,10 +34,36 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
         & ~adata.obs["CD20_pos"]
     )
 
+    # Myeloid cells: CD45+ AND (HLA-DR+ OR CD11+) excluding T/B
+    adata.obs["type_Myeloid"] = (
+            adata.obs["CD45_pos"]
+            & (adata.obs["HLA-DR_pos"] | adata.obs["CD11_pos"])
+            & ~adata.obs["CD3e_pos"]
+            & ~adata.obs["CD20_pos"]
+            & ~adata.obs["CD79a_pos"]
+    )
+
+    # Stromal cells: Vimentin+ OR Collagen IV+, excluding CD45, LYVE1, CD31
+    adata.obs["type_Stromal"] = (
+            (adata.obs["Vimentin_pos"] | adata.obs["Collagen_IV_pos"])
+            & ~adata.obs["CD45_pos"]
+            & ~adata.obs["LYVE1_pos"]
+            & ~adata.obs["CD31_pos"]
+    )
+
+    # Endothelial cells: CD31+ OR CD34+ OR LYVE1+, excluding CD45
+    adata.obs["type_Endothelial"] = (
+            (adata.obs["CD31_pos"] | adata.obs["CD34_pos"] | adata.obs["LYVE1_pos"])
+            & ~adata.obs["CD45_pos"]
+    )
+
     adata.obs["type_unclassified"] = ~(
-        adata.obs["type_B"]
-        | adata.obs["type_T"]
-        | adata.obs["type_NK"]
+            adata.obs["type_B"]
+            | adata.obs["type_T"]
+            | adata.obs["type_NK"]
+            | adata.obs["type_Myeloid"]
+            | adata.obs["type_Stromal"]
+            | adata.obs["type_Endothelial"]
     )
 
     # LEVEL 2: INTERMEDIATE STATES
@@ -221,6 +247,84 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
 
     adata.obs["subtype_T_unassigned"] = (
         t & ~adata.obs[t_subtypes].any(axis=1)
+    )
+
+    # -----------------------------
+    # LEVEL 3: SUBTYPES – MYELOID
+    # -----------------------------
+    my = adata.obs["type_Myeloid"]
+
+    # cDC1: CD141+ AND Myeloid, exclude T/B/CD1c/CD68/CD163
+    adata.obs["subtype_cDC1"] = (
+            my
+            & adata.obs["CD141_pos"]
+            & ~adata.obs["CD1c_pos"]
+            & ~adata.obs["CD68_pos"]
+            & ~adata.obs["CD163_pos"]
+            & ~adata.obs["CD3e_pos"]
+            & ~adata.obs["CD20_pos"]
+    )
+
+    # cDC2: CD1c+ AND Myeloid, exclude T/B/CD141/CD68/CD163
+    adata.obs["subtype_cDC2"] = (
+            my
+            & adata.obs["CD1c_pos"]
+            & ~adata.obs["CD141_pos"]
+            & ~adata.obs["CD68_pos"]
+            & ~adata.obs["CD163_pos"]
+            & ~adata.obs["CD3e_pos"]
+            & ~adata.obs["CD20_pos"]
+    )
+
+    # Monocyte/macrophage: CD14 OR CD68 OR CD163, exclude T/B
+    adata.obs["subtype_Monocyte_Macrophage"] = (
+            my
+            & (adata.obs["CD14_pos"] | adata.obs["CD68_pos"] | adata.obs["CD163_pos"])
+            & ~adata.obs["CD3e_pos"]
+            & ~adata.obs["CD20_pos"]
+    )
+
+    # STROMAL
+    # Fibroblast: Vimentin+, exclude LYVE1/CD45 (optionally CD31-/Collagen IV-)
+    adata.obs["subtype_Fibroblast"] = (
+            adata.obs["Vimentin_pos"]
+            & ~adata.obs["LYVE1_pos"]
+            & ~adata.obs["CD45_pos"]
+    )
+
+    # Basement membrane: Collagen IV+, exclude CD31/CD45
+    adata.obs["subtype_Basement_Membrane"] = (
+            adata.obs["Collagen_IV_pos"]
+            & ~adata.obs["CD31_pos"]
+            & ~adata.obs["CD45_pos"]
+    )
+
+    # FDC: CD21+ AND CXCL13+, exclude CD45/T/B
+    adata.obs["subtype_FDC"] = (
+            adata.obs["CD21_pos"]
+            & adata.obs["CXCL13_pos"]
+            & ~adata.obs["CD45_pos"]
+            & ~adata.obs["CD3e_pos"]
+            & ~adata.obs["CD20_pos"]
+    )
+
+    # ENDOTHELIAL
+    # Blood endothelial cells: CD31+ AND CD34+, exclude LYVE1/CD45/T/B
+    adata.obs["subtype_Blood_Endothelial"] = (
+            adata.obs["CD31_pos"]
+            & adata.obs["CD34_pos"]
+            & ~adata.obs["LYVE1_pos"]
+            & ~adata.obs["CD45_pos"]
+            & ~adata.obs["CD3e_pos"]
+            & ~adata.obs["CD20_pos"]
+    )
+
+    # Lymphatic endothelial cells: LYVE1+, exclude T/B/CD45
+    adata.obs["subtype_Lymphatic_Endothelial"] = (
+            adata.obs["LYVE1_pos"]
+            & ~adata.obs["CD3e_pos"]
+            & ~adata.obs["CD20_pos"]
+            & ~adata.obs["CD45_pos"]
     )
 
     # Avoid anndata fragmentation
