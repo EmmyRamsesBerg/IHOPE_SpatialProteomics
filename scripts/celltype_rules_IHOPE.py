@@ -376,12 +376,10 @@ def add_TfH_like_cells(
         if key not in adata.obs:
             raise ValueError(f"{key} not found in adata.obs")
 
-    not_naive = ~adata.obs["intermediate_T_naive"]
-
     adata.obs[output_key] = (
         adata.obs["intermediate_CD4_T"]
         & adata.obs[follicle_key]
-        & not_naive
+        & ~adata.obs["intermediate_T_naive"]
         & (adata.obs["PD-1_pos"] | adata.obs["ICOS_pos"])
     )
 
