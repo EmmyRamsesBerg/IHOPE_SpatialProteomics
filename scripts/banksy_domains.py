@@ -124,7 +124,7 @@ def plot_bcell_follicles(
     )
 
     domain_ids = follicle_domains.cat.categories
-    cmap = plt.get_cmap("tab10")
+    cmap = plt.get_cmap("viridis")
 
     for i, domain in enumerate(domain_ids):
         idx = (
