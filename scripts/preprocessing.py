@@ -132,56 +132,70 @@ def preprocess(input_file: str, output_file: str | None = None, plot: bool = Tru
     filtered_df.to_csv(output_file, index=False)
     print(f"Filtered data saved to: {output_file}")
 
-def preprocess_chunked(input_file: str,
-                       output_file: str,
-                       chunksize: int = 100000):
+def extract_and_filter_columns_chunked(
+        input_csv_path,
+        output_csv_path,
+        target_columns,
+        obs_columns,
+        chunksize=100000,
+        encoding="utf-8"
+):
     """
-    Memory-safe filtering of large CSV files.
-    Applies the same filtering as preprocess(), but in chunks.
+    Reads a large spatial proteomics CSV in chunks, keeps only relevant
+    marker + observation columns, and applies basic filtering.
     """
 
     import os
-    import numpy as np
     import pandas as pd
+    import numpy as np
 
     area_column = "Area µm^2"
     dapi_column = "DAPI: Mean"
 
-    if os.path.exists(output_file):
-        os.remove(output_file)
+    keep_columns = list(set(target_columns + obs_columns))
+
+    if os.path.exists(output_csv_path):
+        os.remove(output_csv_path)
 
     first_chunk = True
 
-    reader = pd.read_csv(input_file, encoding="utf-8", chunksize=chunksize)
+    reader = pd.read_csv(
+        input_csv_path,
+        usecols=lambda c: c in keep_columns,
+        chunksize=chunksize,
+        encoding=encoding
+    )
 
     for chunk in reader:
 
         if area_column not in chunk.columns:
             raise ValueError(f"Missing required column: {area_column}")
+
         if dapi_column not in chunk.columns:
             raise ValueError(f"Missing required column: {dapi_column}")
 
-        # Area filter
-        filtered_df = chunk[
+        # Area filtering
+        filtered = chunk[
             (chunk[area_column] >= 20) &
             (chunk[area_column] <= 200)
         ]
 
-        # DAPI filter
-        filtered_df = filtered_df.dropna(subset=[dapi_column])
+        # Remove missing DAPI
+        filtered = filtered.dropna(subset=[dapi_column])
 
-        if len(filtered_df) == 0:
+        if len(filtered) == 0:
             continue
 
-        low, high = np.percentile(filtered_df[dapi_column], [1, 99])
+        # Percentile filtering
+        low, high = np.percentile(filtered[dapi_column], [1, 99])
 
-        filtered_df = filtered_df[
-            (filtered_df[dapi_column] >= low) &
-            (filtered_df[dapi_column] <= high)
+        filtered = filtered[
+            (filtered[dapi_column] >= low) &
+            (filtered[dapi_column] <= high)
         ]
 
-        filtered_df.to_csv(
-            output_file,
+        filtered.to_csv(
+            output_csv_path,
             mode="w" if first_chunk else "a",
             header=first_chunk,
             index=False
@@ -189,70 +203,5 @@ def preprocess_chunked(input_file: str,
 
         first_chunk = False
 
-    print(f"Filtered data saved to: {output_file}")
+    print(f"Processed CSV saved to: {output_csv_path}")
 
-
-def clean_cell_columns_chunked(input_csv_path: str,
-                               output_csv_path: str,
-                               chunksize: int = 100000,
-                               encoding: str = "utf-8"):
-    """
-    Memory-safe version of clean_cell_columns for very large CSV files.
-    Processes the file in chunks.
-    """
-
-    import os
-    import pandas as pd
-
-    # Remove output file if it already exists
-    if os.path.exists(output_csv_path):
-        os.remove(output_csv_path)
-
-    first_chunk = True
-
-    try:
-        reader = pd.read_csv(
-            input_csv_path,
-            sep=None,
-            engine="python",
-            encoding=encoding,
-            chunksize=chunksize
-        )
-    except UnicodeDecodeError:
-        reader = pd.read_csv(
-            input_csv_path,
-            sep=None,
-            engine="python",
-            encoding="cp1252",
-            chunksize=chunksize
-        )
-
-    for chunk in reader:
-
-        # Normalize column names
-        chunk.columns = (
-            chunk.columns
-            .str.strip()
-            .str.lstrip("\ufeff")
-            .str.replace("Âµ", "µ", regex=False)
-            .str.replace("μ", "µ", regex=False)
-        )
-
-        # Drop unwanted columns
-        cols_to_drop = ["Image", "Name", "Classification"]
-        chunk = chunk.drop(columns=[c for c in cols_to_drop if c in chunk.columns])
-
-        # Strip 'Cell:' prefix
-        chunk.columns = chunk.columns.str.replace(r"^Cell:\s*", "", regex=True)
-
-        chunk.to_csv(
-            output_csv_path,
-            mode="w" if first_chunk else "a",
-            header=first_chunk,
-            index=False,
-            encoding="utf-8"
-        )
-
-        first_chunk = False
-
-    print(f"Chunk-cleaned CSV saved to: {output_csv_path}")
