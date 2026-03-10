@@ -149,10 +149,25 @@ def extract_and_filter_columns_chunked(
     import pandas as pd
     import numpy as np
 
-    area_column = "Area µm^2"
-    dapi_column = "DAPI: Mean"
+    # --- Normalize micro symbols everywhere ---
+    def normalize_micro(col: str) -> str:
+        return (
+            col.strip()
+               .replace("Âµ", "µ")
+               .replace("μ", "µ")
+               .replace(" um", " µm")
+               .replace("um", "µm")
+        )
 
-    keep_columns = list(set(target_columns + obs_columns))
+    # Normalize expected column lists
+    target_columns = [normalize_micro(c) for c in target_columns]
+    obs_columns = [normalize_micro(c) for c in obs_columns]
+
+    keep_columns = target_columns + obs_columns
+
+    # Normalize filter column names
+    area_column = normalize_micro("Area µm^2")
+    dapi_column = "DAPI: Mean"
 
     if os.path.exists(output_csv_path):
         os.remove(output_csv_path)
@@ -161,12 +176,15 @@ def extract_and_filter_columns_chunked(
 
     reader = pd.read_csv(
         input_csv_path,
-        usecols=lambda c: c in keep_columns,
+        usecols=lambda c: normalize_micro(c) in keep_columns,
         chunksize=chunksize,
         encoding=encoding
     )
 
     for chunk in reader:
+
+        # Normalize incoming column names
+        chunk.columns = [normalize_micro(c) for c in chunk.columns]
 
         if area_column not in chunk.columns:
             raise ValueError(f"Missing required column: {area_column}")
@@ -204,4 +222,5 @@ def extract_and_filter_columns_chunked(
         first_chunk = False
 
     print(f"Processed CSV saved to: {output_csv_path}")
+
 
