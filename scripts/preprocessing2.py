@@ -1,4 +1,4 @@
-# New version 2026-03-11
+# New version 2026-02-13
 
 import os
 import numpy as np
@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 
 
 # Shared robust CSV reader
+
 def robust_read_csv(path: str) -> pd.DataFrame:
     try:
         return pd.read_csv(path, sep=None, engine="python", encoding="utf-8")
@@ -15,16 +16,9 @@ def robust_read_csv(path: str) -> pd.DataFrame:
 
 
 def normalize_micro(col: str) -> str:
-    """
-    Normalize column names across different exports.
-    Handles micro symbols, stray spaces, and QuPath prefixes.
-    """
     return (
-        col.strip()
-        .lstrip("\ufeff")
-        .replace("Cell: ", "")
+        col
         .replace("Âµ", "µ")
-        .replace("μ", "µ")
         .replace(" um", " µm")
         .replace("u m", "µm")
         .replace("um", "µm")
@@ -32,6 +26,9 @@ def normalize_micro(col: str) -> str:
 
 
 # - Cleaning step -
+
+import os
+import pandas as pd
 
 def clean_cell_columns(input_csv_path: str, output_csv_path: str, encoding: str = "utf-8"):
     """
@@ -43,23 +40,39 @@ def clean_cell_columns(input_csv_path: str, output_csv_path: str, encoding: str 
     Saves the cleaned CSV to the output path.
     """
 
+    #  Load CSV with encoding fallback
     try:
         df = pd.read_csv(input_csv_path, sep=None, engine="python", encoding=encoding)
     except UnicodeDecodeError:
         print(f"Failed to read {input_csv_path} as {encoding}, trying cp1252...")
         df = pd.read_csv(input_csv_path, sep=None, engine="python", encoding="cp1252")
 
-    df.columns = [normalize_micro(c) for c in df.columns]
+    #  Normalize column names
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.lstrip("\ufeff")
+        .str.replace("Âµ", "µ", regex=False)
+        .str.replace("μ", "µ", regex=False)
+    )
 
+    #  Drop unwanted columns
     cols_to_drop = ["Image", "Name", "Classification"]
     df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
 
+    #  Strip 'Cell:' prefix
+    df.columns = df.columns.str.replace(r"^Cell:\s*", "", regex=True)
+
+    #  Ensure output directory exists
     output_dir = os.path.dirname(output_csv_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
+        print(f"Created directory: {output_dir}")
 
+    # Save as UTF-8
     df.to_csv(output_csv_path, index=False, encoding="utf-8")
     print(f"Cleaned CSV saved to: {output_csv_path}")
+
 
 
 # Main preprocessing
@@ -68,10 +81,7 @@ def preprocess(input_file: str, output_file: str | None = None, plot: bool = Tru
     """
     Preprocess CSV by filtering cells based on area and DAPI intensity.
     """
-
     df = pd.read_csv(input_file, encoding="utf-8")
-
-    df.columns = [normalize_micro(c) for c in df.columns]
 
     area_column = "Area µm^2"
     dapi_column = "DAPI: Mean"
@@ -81,22 +91,24 @@ def preprocess(input_file: str, output_file: str | None = None, plot: bool = Tru
     if dapi_column not in df.columns:
         raise ValueError(f"Missing required column: {dapi_column}")
 
+    # Area filter
     filtered_df = df[(df[area_column] >= 20) & (df[area_column] <= 200)]
 
+    # DAPI filter
     filtered_df = filtered_df.dropna(subset=[dapi_column])
 
     low, high = np.percentile(filtered_df[dapi_column], [1, 99])
-
     filtered_df = filtered_df[
         (filtered_df[dapi_column] >= low) &
         (filtered_df[dapi_column] <= high)
     ]
 
+    # Plotting
     if plot:
         plt.figure(figsize=(12, 6))
-
         plt.subplot(1, 2, 1)
-        plt.boxplot(
+        #plt.boxplot(df[dapi_column], vert=False)
+        plt.boxplot( #start addition
             df[dapi_column].values,
             vert=False,
             showfliers=False,
@@ -104,27 +116,21 @@ def preprocess(input_file: str, output_file: str | None = None, plot: bool = Tru
         plt.xlim(
             np.percentile(df[dapi_column], 0.5),
             np.percentile(df[dapi_column], 99.5),
-        )
+        ) #end addition
         plt.title("Original DAPI")
-
         plt.subplot(1, 2, 2)
         plt.hist(df[dapi_column], bins=30)
-
         plt.tight_layout()
         plt.show()
 
+    # Output path
     if output_file is None:
         base, ext = os.path.splitext(input_file)
         output_file = f"{base}_filtered{ext}"
 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
-
     filtered_df.to_csv(output_file, index=False)
-
     print(f"Filtered data saved to: {output_file}")
-
-
-# --- Large file processing ---
 
 def extract_and_filter_columns_chunked(
         input_csv_path,
@@ -135,23 +141,33 @@ def extract_and_filter_columns_chunked(
         encoding="utf-8"
 ):
     """
-    Memory-safe processing for very large spatial proteomics CSV files.
-
-    Steps:
-    - Read CSV in chunks
-    - Normalize column names
-    - Remove 'Cell: ' prefixes
-    - Keep only marker + observation columns
-    - Filter cells by area and DAPI
-    - Append filtered rows to output CSV
+    Reads a large spatial proteomics CSV in chunks, keeps only relevant
+    marker + observation columns, and applies basic filtering.
     """
 
-    target_columns = [normalize_micro(c) for c in target_columns]
-    obs_columns = [normalize_micro(c) for c in obs_columns]
+    import os
+    import pandas as pd
+    import numpy as np
+
+    # --- Normalize micro symbols everywhere ---
+    def normalize_colnames(col: str) -> str:
+        return (
+            col.strip()
+               .replace("Âµ", "µ")
+               .replace("μ", "µ")
+               .replace(" um", " µm")
+               .replace("u m", "µm")
+               .replace("um", "µm")
+        )
+
+    # Normalize expected column lists
+    target_columns = [normalize_colnames(c) for c in target_columns]
+    obs_columns = [normalize_colnames(c) for c in obs_columns]
 
     keep_columns = target_columns + obs_columns
 
-    area_column = normalize_micro("Area µm^2")
+    # Normalize filter column names
+    area_column = normalize_colnames("Area µm^2")
     dapi_column = "DAPI: Mean"
 
     if os.path.exists(output_csv_path):
@@ -166,27 +182,31 @@ def extract_and_filter_columns_chunked(
     )
 
     for chunk in reader:
+        # Normalize column names
+        chunk.columns = [normalize_colnames(c) for c in chunk.columns]
 
-        chunk.columns = [normalize_micro(c) for c in chunk.columns]
+        # Subset only the columns you care about
+        chunk = chunk[keep_columns]
 
-        chunk = chunk[[c for c in keep_columns if c in chunk.columns]]
-
+        # Now area_column and dapi_column exist
         if area_column not in chunk.columns:
             raise ValueError(f"Missing required column: {area_column}")
-
         if dapi_column not in chunk.columns:
             raise ValueError(f"Missing required column: {dapi_column}")
 
+        # Area filtering
         filtered = chunk[
             (chunk[area_column] >= 20) &
             (chunk[area_column] <= 200)
         ]
 
+        # Remove missing DAPI
         filtered = filtered.dropna(subset=[dapi_column])
 
         if len(filtered) == 0:
             continue
 
+        # Percentile filtering
         low, high = np.percentile(filtered[dapi_column], [1, 99])
 
         filtered = filtered[
@@ -204,3 +224,5 @@ def extract_and_filter_columns_chunked(
         first_chunk = False
 
     print(f"Processed CSV saved to: {output_csv_path}")
+
+
