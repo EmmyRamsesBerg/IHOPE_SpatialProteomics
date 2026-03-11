@@ -156,6 +156,7 @@ def extract_and_filter_columns_chunked(
                .replace("Âµ", "µ")
                .replace("μ", "µ")
                .replace(" um", " µm")
+               .replace("u m", "µm")
                .replace("um", "µm")
         )
 
@@ -176,19 +177,20 @@ def extract_and_filter_columns_chunked(
 
     reader = pd.read_csv(
         input_csv_path,
-        usecols=lambda c: normalize_micro(c) in keep_columns,
         chunksize=chunksize,
         encoding=encoding
     )
 
     for chunk in reader:
-
-        # Normalize incoming column names
+        # Normalize column names
         chunk.columns = [normalize_micro(c) for c in chunk.columns]
 
+        # Subset only the columns you care about
+        chunk = chunk[keep_columns]
+
+        # Now area_column and dapi_column exist
         if area_column not in chunk.columns:
             raise ValueError(f"Missing required column: {area_column}")
-
         if dapi_column not in chunk.columns:
             raise ValueError(f"Missing required column: {dapi_column}")
 
