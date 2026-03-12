@@ -128,6 +128,7 @@ def spatial_celltype_plot(
     alpha=0.6,
     size=10,
     palette=None,
+    title: str = "",
 ):
     """
     Plot spatial positions of cells colored by cell type.
@@ -145,6 +146,8 @@ def spatial_celltype_plot(
         Minimum number of cells required for a cell type to be included
     palette : dict or None
         Optional {cell_type: color} mapping. If None, will generate colors automatically.
+    title: Str or None
+        Optional plot title
     """
     # Filter cell types by min_cells
     valid_cts = [ct for ct in celltype_cols if adata.obs[ct].sum() >= min_cells]
@@ -202,6 +205,7 @@ def spatial_celltype_plot(
     plt.gca().invert_yaxis()  # match image orientation if needed
     plt.legend(markerscale=2, bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
+    plt.title(title)
     plt.show()
 
     return palette

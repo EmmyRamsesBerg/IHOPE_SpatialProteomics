@@ -9,6 +9,11 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
     Parallel assignment at all levels (type / intermediate / subtype).
     """
 
+    # LEVEL 0: REMOVE OLD CELL TYPING
+    old_columns = [c for c in adata.obs.columns if c.startswith(("type_", "intermediate_", "subtype_", "state_"))]
+    if old_columns:
+        adata.obs.drop(columns=old_columns, inplace=True)
+
     # LEVEL 1: LINEAGE/TYPE
 
     # B cells: CD45+, (CD20 OR CD79a)+, CD3e-
