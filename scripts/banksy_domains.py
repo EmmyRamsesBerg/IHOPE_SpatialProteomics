@@ -43,8 +43,8 @@ def compute_domain_bcell_stats(
         })
 
     stats_df = pd.DataFrame(stats).sort_values("frac_B", ascending=False)
-    print("BANKSY domains ranked by B-cell fraction:")
-    print(stats_df.to_string(index=False))
+    #print("BANKSY domains ranked by B-cell fraction:")
+    #print(stats_df.to_string(index=False))
     return stats_df
 
 
@@ -55,6 +55,7 @@ def plot_domains_by_bcell_fraction(
     size: float = 1,
     alpha: float = 0.8,
     cmap: str = "coolwarm",
+    sample_name: str = ""
 ):
     """
     Plot cells colored by BANKSY domain.
@@ -82,7 +83,14 @@ def plot_domains_by_bcell_fraction(
     domain_to_color = dict(zip(domains, colors))
 
     # Assign colors to cells
-    cell_colors = adata.obs[banksy_domain_key].map(domain_to_color)
+    domains_series = adata.obs[banksy_domain_key]
+
+    # Ensure domains are simple hashable values
+    domains_series = domains_series.astype(str)
+
+    domain_to_color = {str(k): v for k, v in domain_to_color.items()}
+
+    cell_colors = domains_series.map(domain_to_color)
 
     plt.figure(figsize=(6, 6))
 
@@ -97,7 +105,7 @@ def plot_domains_by_bcell_fraction(
     plt.gca().invert_yaxis()
     plt.axis("equal")
     plt.axis("off")
-    plt.title("BANKSY domains ranked by B-cell fraction")
+    plt.title(f"{sample_name} BANKSY domains ranked by B-cell fraction")
 
     # Legend
     for domain, color, frac in zip(
@@ -124,14 +132,21 @@ def assign_bcell_follicles(
     banksy_domain_key: str = "banksy_domain",
     output_key: str = "B_follicle",
 ) -> AnnData:
-    """
-    Create a boolean mask for B-cell follicles based on selected BANKSY domains.
-    """
 
-    adata.obs[output_key] = adata.obs[banksy_domain_key].isin(follicle_domains)
-    n_follicle_cells = adata.obs[output_key].sum()
-    print(f"{output_key}: {n_follicle_cells} cells in {len(follicle_domains)} selected domains")
+    domains = adata.obs[banksy_domain_key].astype(str)
+    follicle_domains = [str(d) for d in follicle_domains]
+
+    adata.obs[output_key] = domains.isin(follicle_domains)
+
+    n = adata.obs[output_key].sum()
+
+    print(
+        f"{output_key}: {n} cells "
+        f"in {len(follicle_domains)} selected domains"
+    )
+
     return adata
+
 
 
 def plot_bcell_follicles(
