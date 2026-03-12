@@ -57,35 +57,63 @@ def plot_domains_by_bcell_fraction(
     cmap: str = "coolwarm",
 ):
     """
-    Plot all cells colored by B-cell fraction in their BANKSY domain.
-    Adds domain labels in legend with B-cell percentages.
+    Plot cells colored by BANKSY domain.
+    Domains are ranked by B-cell fraction and assigned discrete colors
+    from red (high B) to blue (low B).
+    Legend shows domain number and % B cells.
     """
+
+    import numpy as np
 
     x = adata.obsm["spatial"][:, 0]
     y = adata.obsm["spatial"][:, 1]
 
-    # Map domain -> B fraction
-    domain_to_frac = dict(zip(stats_df["domain"], stats_df["frac_B"]))
-    colors = adata.obs[banksy_domain_key].map(domain_to_frac)
+    # Rank domains by B-cell fraction
+    stats_df = stats_df.sort_values("frac_B", ascending=False).reset_index(drop=True)
+
+    domains = stats_df["domain"].tolist()
+    n_domains = len(domains)
+
+    # Discrete colors sampled from colormap
+    cmap_obj = plt.get_cmap(cmap)
+    colors = cmap_obj(np.linspace(1, 0, n_domains))  # red -> blue
+
+    # Map domain -> color
+    domain_to_color = dict(zip(domains, colors))
+
+    # Assign colors to cells
+    cell_colors = adata.obs[banksy_domain_key].map(domain_to_color)
 
     plt.figure(figsize=(6, 6))
-    sc = plt.scatter(x, y, c=colors, s=size, alpha=alpha, cmap=cmap, vmin=0, vmax=1)
-    cbar = plt.colorbar(sc, label="B-cell fraction")
+
+    plt.scatter(
+        x,
+        y,
+        c=list(cell_colors),
+        s=size,
+        alpha=alpha
+    )
+
     plt.gca().invert_yaxis()
     plt.axis("equal")
     plt.axis("off")
-    plt.title("BANKSY domains colored by B-cell fraction")
+    plt.title("BANKSY domains ranked by B-cell fraction")
 
-    # Create a legend with domain numbers and % B-cells
-    domain_labels = [
-        f"Domain {row.domain} ({row.frac_B*100:.0f}% B-cells)"
-        for _, row in stats_df.iterrows()
-    ]
-    # Unique colors for legend (from colormap)
-    norm_colors = plt.cm.get_cmap(cmap)(stats_df["frac_B"].values)
-    for color, label in zip(norm_colors, domain_labels):
-        plt.scatter([], [], c=[color], label=label, s=30, alpha=0.8)
-    plt.legend(markerscale=2, bbox_to_anchor=(1.05, 1), loc="upper left", frameon=False)
+    # Legend
+    for domain, color, frac in zip(
+        stats_df["domain"],
+        colors,
+        stats_df["frac_B"]
+    ):
+        label = f"Domain {domain} ({frac*100:.0f}% B-cells)"
+        plt.scatter([], [], c=[color], label=label, s=30, alpha=0.9)
+
+    plt.legend(
+        markerscale=2,
+        bbox_to_anchor=(1.05, 1),
+        loc="upper left",
+        frameon=False
+    )
 
     plt.show()
 
