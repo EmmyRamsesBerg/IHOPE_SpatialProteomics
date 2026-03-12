@@ -14,7 +14,7 @@ def robust_read_csv(path: str) -> pd.DataFrame:
         return pd.read_csv(path, sep=None, engine="python", encoding="cp1252")
 
 
-def normalize_micro(col: str) -> str:
+def normalize_colnames(col: str) -> str:
     """
     Normalize column names across different exports.
     Handles micro symbols, stray spaces, and QuPath prefixes.
@@ -49,7 +49,7 @@ def clean_cell_columns(input_csv_path: str, output_csv_path: str, encoding: str 
         print(f"Failed to read {input_csv_path} as {encoding}, trying cp1252...")
         df = pd.read_csv(input_csv_path, sep=None, engine="python", encoding="cp1252")
 
-    df.columns = [normalize_micro(c) for c in df.columns]
+    df.columns = [normalize_colnames(c) for c in df.columns]
 
     cols_to_drop = ["Image", "Name", "Classification"]
     df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
@@ -71,7 +71,7 @@ def preprocess(input_file: str, output_file: str | None = None, plot: bool = Tru
 
     df = pd.read_csv(input_file, encoding="utf-8")
 
-    df.columns = [normalize_micro(c) for c in df.columns]
+    df.columns = [normalize_colnames(c) for c in df.columns]
 
     area_column = "Area µm^2"
     dapi_column = "DAPI: Mean"
@@ -146,12 +146,12 @@ def extract_and_filter_columns_chunked(
     - Append filtered rows to output CSV
     """
 
-    target_columns = [normalize_micro(c) for c in target_columns]
-    obs_columns = [normalize_micro(c) for c in obs_columns]
+    target_columns = [normalize_colnames(c) for c in target_columns]
+    obs_columns = [normalize_colnames(c) for c in obs_columns]
 
     keep_columns = target_columns + obs_columns
 
-    area_column = normalize_micro("Area µm^2")
+    area_column = normalize_colnames("Area µm^2")
     dapi_column = "DAPI: Mean"
 
     if os.path.exists(output_csv_path):
@@ -167,7 +167,7 @@ def extract_and_filter_columns_chunked(
 
     for chunk in reader:
 
-        chunk.columns = [normalize_micro(c) for c in chunk.columns]
+        chunk.columns = [normalize_colnames(c) for c in chunk.columns]
 
         chunk = chunk[[c for c in keep_columns if c in chunk.columns]]
 
