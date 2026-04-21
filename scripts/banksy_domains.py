@@ -138,6 +138,9 @@ def assign_bcell_follicles(
 
     adata.obs[output_key] = domains.isin(follicle_domains)
 
+    #Store metadata
+    adata.uns["B_follicle_domains"] = follicle_domains
+
     n = adata.obs[output_key].sum()
 
     print(
