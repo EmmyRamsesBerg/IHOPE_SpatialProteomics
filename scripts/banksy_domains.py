@@ -11,7 +11,7 @@ def compute_domain_bcell_stats(
     banksy_domain_key: str = "banksy_domain",
     bcell_key: str = "type_B",
     tcell_key: str = "type_T",
-    min_cells_per_domain: int = 50,
+    min_cells_per_domain: int = 1,
 ) -> pd.DataFrame:
     """
     Compute B-cell enrichment statistics for BANKSY domains.

@@ -127,7 +127,6 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
     # B cell subtypes
 
     # GC B cells: CD20+, CD27+, CD38+
-    # TODO: add CD21 or not?
     adata.obs["subtype_B_GC"] = (
         b
         & not_B_naive
@@ -441,6 +440,83 @@ def add_TfH_like_cells(
         plt.axis("off")
         plt.legend(markerscale=3, frameon=False)
         plt.title(f"{sample_name}: TfH-like cells within B-cell follicles")
+        plt.show()
+
+    return adata
+
+def add_spatial_B_context(
+    adata: AnnData,
+    follicle_key: str = "B_follicle",
+    output_gc_key: str = "subtype_B_GC_follicular",
+    output_pb_key: str = "subtype_B_plasmablast_extrafollicular",
+    plot: bool = False,
+    size: float = 1.0,
+    sample_name: str = "",
+):
+    """
+    Add spatially refined B-cell subsets WITHOUT modifying existing annotations.
+
+    GC B (follicular):
+        subtype_B_GC AND inside follicle
+
+    Plasmablast (extrafollicular):
+        subtype_B_plasmablast AND outside follicle
+    """
+
+    required_keys = [
+        follicle_key,
+        "subtype_B_GC",
+        "subtype_B_plasmablast",
+    ]
+
+    for key in required_keys:
+        if key not in adata.obs:
+            raise ValueError(f"{key} not found in adata.obs")
+
+    # GC B cells inside follicles
+    adata.obs[output_gc_key] = (
+        adata.obs["subtype_B_GC"]
+        & adata.obs[follicle_key]
+    )
+
+    # Plasmablasts outside follicles
+    adata.obs[output_pb_key] = (
+        adata.obs["subtype_B_plasmablast"]
+        & ~adata.obs[follicle_key]
+    )
+
+    # Summary
+    print("Spatial B-cell annotations added:")
+    for col in [output_gc_key, output_pb_key]:
+        count = int(adata.obs[col].sum())
+        pct = 100 * adata.obs[col].mean()
+        print(f"  {col}: {count} ({pct:.2f}%)")
+
+    # Optional plot (same style as TfH)
+    if plot:
+        import matplotlib.pyplot as plt
+
+        x = adata.obsm["spatial"][:, 0]
+        y = adata.obsm["spatial"][:, 1]
+
+        plt.figure(figsize=(6, 6))
+
+        plt.scatter(x, y, s=size, c="lightgrey", alpha=0.3)
+
+        f = adata.obs[follicle_key]
+        plt.scatter(x[f], y[f], s=size * 2, c="orange", alpha=0.4, label="Follicle")
+
+        gc = adata.obs[output_gc_key]
+        plt.scatter(x[gc], y[gc], s=size * 4, c="blue", label="GC (follicular)")
+
+        pb = adata.obs[output_pb_key]
+        plt.scatter(x[pb], y[pb], s=size * 4, c="red", label="Plasmablast (extra-follicular)")
+
+        plt.gca().invert_yaxis()
+        plt.axis("equal")
+        plt.axis("off")
+        plt.legend(markerscale=3, frameon=False)
+        plt.title(f"{sample_name}: Spatial B-cell subsets")
         plt.show()
 
     return adata
