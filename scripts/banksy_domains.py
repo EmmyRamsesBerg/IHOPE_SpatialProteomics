@@ -188,3 +188,19 @@ def plot_bcell_follicles(
     plt.legend(markerscale=3, frameon=False)
     plt.title(f"{sample_name}: B-cell follicles")
     plt.show()
+
+def plot_domain_mask(adata, domain="4"):
+    x = adata.obsm["spatial"][:, 0]
+    y = adata.obsm["spatial"][:, 1]
+
+    d = adata.obs["banksy_domain"].astype(str) == str(domain)
+
+    plt.figure(figsize=(6,6))
+    plt.scatter(x, y, c="lightgray", s=1, alpha=0.3)
+    plt.scatter(x[d], y[d], c="black", s=2)
+
+    plt.gca().invert_yaxis()
+    plt.axis("equal")
+    plt.axis("off")
+    plt.title(f"Domain {domain} (ALL cells)")
+    plt.show()
