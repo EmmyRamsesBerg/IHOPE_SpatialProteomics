@@ -1,6 +1,9 @@
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
 
 def load_celltype_summaries(
     file_map,
@@ -107,10 +110,7 @@ def plot_celltype_heatmap(
     colorbar_legend=None,
 ):
     """
-    Plot a clean heatmap with square tiles and no gridlines.
-
-    Parameters
-    ----------
+    Parameters:
     matrix : DataFrame
         cell_type × sample matrix of percentages
     cmap : str
@@ -123,50 +123,57 @@ def plot_celltype_heatmap(
 
     n_rows, n_cols = matrix.shape
 
-    # Auto-size figure to keep tiles square
+    # --- figure sizing ---
     if figsize is None:
-        tile_size = 0.35  # inches per tile; adjust if needed
+        tile_size = 0.35
         figsize = (n_cols * tile_size, n_rows * tile_size)
 
     fig, ax = plt.subplots(figsize=figsize)
 
+    # --- heatmap ---
     im = ax.imshow(
         matrix.values,
         cmap=cmap,
-        aspect="equal",     # <-- square tiles
+        aspect="equal",
         interpolation="nearest",
     )
 
-    # Axis ticks & labels
+    # --- axis labels ---
     ax.set_yticks(range(n_rows))
-    ax.set_yticklabels(matrix.index)
+    ax.set_yticklabels(matrix.index, fontsize=8)
 
     ax.set_xticks(range(n_cols))
-    ax.set_xticklabels(matrix.columns, rotation=60, ha="right")
+    ax.set_xticklabels(matrix.columns, rotation=45, ha="right", fontsize=9)
 
-    # Remove gridlines, spines, and tick marks
+    # --- clean axes ---
     ax.grid(False)
     for spine in ax.spines.values():
         spine.set_visible(False)
     ax.tick_params(length=0)
 
-    # Colorbar
-    cbar = fig.colorbar(
-        im,
-        ax=ax,
-        orientation="horizontal",
-        fraction=0.08,
-        pad=0.02,
-        location="top"
-    )
+    # --- better colorbar placement (IMPORTANT FIX) ---
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("top", size="3%", pad=0.3)
 
-    if colorbar_legend is not None:
-        cbar.set_label(colorbar_legend)
+    cbar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    cax.xaxis.set_ticks_position("top")
+    cax.xaxis.set_label_position("top")
 
+    if colorbar_legend is not None: #Attempt to move text to left
+        cbar.ax.text(
+            -0.02, 0.5,
+            colorbar_legend,
+            transform=cbar.ax.transAxes,
+            va="center",
+            ha="right",
+            fontsize=10,
+        )
+
+    # --- title styling ---
     if title is not None:
-        ax.set_title(title)
+        ax.set_title(title, fontsize=12, pad=20)
 
-    fig.tight_layout()
+    plt.tight_layout()
     plt.show()
 
 
