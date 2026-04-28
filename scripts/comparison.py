@@ -1,5 +1,6 @@
 from pathlib import Path
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
@@ -82,7 +83,7 @@ def pivot_for_heatmap(df):
         raise ValueError(f"Missing required columns: {missing}")
 
     df = df.copy()
-    df = df[~df["cell_type"].str.endswith("_Unassigned")] #Drop unassigned
+    df = df[~df["cell_type"].str.endswith("_unassigned")] #Drop unassigned
 
     # Ordering by type-intermediate-subtype
     level_order = ["type", "intermediate", "subtype"]
@@ -99,6 +100,24 @@ def pivot_for_heatmap(df):
         fill_value=0.0,
     )
 
+    level_rank = {
+        "type": 0,
+        "intermediate": 1,
+        "subtype": 2,
+    }
+
+    level_lookup = df.drop_duplicates("cell_type").set_index("cell_type")["level"]
+
+    matrix = matrix.loc[
+        sorted(
+            matrix.index,
+            key=lambda x: (
+                level_rank.get(level_lookup.loc[x], 99),
+                x
+            )
+        )
+    ]
+
     return matrix
 
 
@@ -108,6 +127,7 @@ def plot_celltype_heatmap(
     figsize=None,
     title=None,
     colorbar_legend=None,
+    scale="linear",
 ):
     """
     Parameters:
@@ -131,11 +151,28 @@ def plot_celltype_heatmap(
     fig, ax = plt.subplots(figsize=figsize)
 
     # --- heatmap ---
+    if scale == "linear":
+        # safe default for percentages
+        vmin = 0
+        vmax = 50
+
+    elif scale == "log":
+        # use data-driven limits for log space
+        vmin = np.nanmin(matrix.values)
+        vmax = np.nanmax(matrix.values)
+
+    else:
+        # fallback: fully data-driven
+        vmin = np.nanmin(matrix.values)
+        vmax = np.nanmax(matrix.values)
+
     im = ax.imshow(
         matrix.values,
         cmap=cmap,
         aspect="equal",
         interpolation="nearest",
+        vmin=vmin,
+        vmax=vmax,
     )
 
     # --- axis labels ---
@@ -151,7 +188,7 @@ def plot_celltype_heatmap(
         spine.set_visible(False)
     ax.tick_params(length=0)
 
-    # --- better colorbar placement (IMPORTANT FIX) ---
+    # --- colorbar ---
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("top", size="3%", pad=0.3)
 
@@ -159,7 +196,7 @@ def plot_celltype_heatmap(
     cax.xaxis.set_ticks_position("top")
     cax.xaxis.set_label_position("top")
 
-    if colorbar_legend is not None: #Attempt to move text to left
+    if colorbar_legend is not None:
         cbar.ax.text(
             -0.02, 0.5,
             colorbar_legend,
@@ -168,6 +205,31 @@ def plot_celltype_heatmap(
             ha="right",
             fontsize=10,
         )
+
+    # ---- NEW: unified tick logic ----
+    vmin, vmax = im.get_clim()
+
+    if scale == "linear":
+        if vmax <= 1:
+            ticks = [0, 0.5, 1]
+            labels = ["0", "0.5", "1"]
+        elif vmax <= 50:
+            ticks = [0, 25, 50]
+            labels = ["0", "25", "50"]
+        else:
+            ticks = [0, 50, 100]
+            labels = ["0", "50", "100"]
+
+    elif scale == "log":
+        ticks = np.linspace(vmin, vmax, 3)
+        labels = [f"{t:.1f}" for t in ticks]
+
+    else:
+        ticks = np.linspace(vmin, vmax, 3)
+        labels = [f"{t:.2f}" for t in ticks]
+
+    cbar.set_ticks(ticks)
+    cbar.set_ticklabels(labels)
 
     # --- title styling ---
     if title is not None:
