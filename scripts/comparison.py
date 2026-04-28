@@ -79,6 +79,7 @@ def pivot_for_heatmap(df):
         raise ValueError(f"Missing required columns: {missing}")
 
     df = df.copy()
+    df = df[~df["cell_type"].str.endswith("_Unassigned")] #Drop unassigned
 
     # Ordering by type-intermediate-subtype
     level_order = ["type", "intermediate", "subtype"]
@@ -103,6 +104,7 @@ def plot_celltype_heatmap(
     cmap="Purples",
     figsize=None,
     title=None,
+    colorbar_legend=None,
 ):
     """
     Plot a clean heatmap with square tiles and no gridlines.
@@ -115,6 +117,8 @@ def plot_celltype_heatmap(
         Matplotlib colormap
     figsize : tuple or None
         If None, automatically computed for square tiles
+    colorbar_legend: str or None
+    title: str or None
     """
 
     n_rows, n_cols = matrix.shape
@@ -148,21 +152,22 @@ def plot_celltype_heatmap(
 
     # Colorbar
     cbar = fig.colorbar(
-    im,
-    ax=ax,
-    orientation="horizontal",
-    fraction=0.05,  # thickness of the colorbar
-    pad=0.15,       # space between heatmap and colorbar
-    location="bottom"  # place on top instead of bottom
-)
-    cbar.set_label("log10(% of cells + 0.1)") # Log scale +0.1 for better contrast
+        im,
+        ax=ax,
+        orientation="horizontal",
+        fraction=0.08,
+        pad=0.02,
+        location="top"
+    )
+
+    if colorbar_legend is not None:
+        cbar.set_label(colorbar_legend)
 
     if title is not None:
         ax.set_title(title)
 
     fig.tight_layout()
     plt.show()
-
 
 
 def print_numeric_summary(df):
@@ -201,7 +206,7 @@ def pivot_for_tissue_heatmap(df):
         fill_value=0.0,
     )
 
-    # --- enforce correct row order manually ---
+    # Enforce correct row order
     ordered_rows = (
         df[["level", "cell_type"]]
         .drop_duplicates()
