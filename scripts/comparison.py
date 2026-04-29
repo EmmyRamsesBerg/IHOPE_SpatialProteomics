@@ -2,6 +2,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
@@ -238,6 +239,90 @@ def plot_celltype_heatmap(
     plt.tight_layout()
     plt.show()
 
+def plot_celltype_clustermap(
+    matrix,
+    cmap="Purples",
+    scale="linear",
+    figsize=(8, 10),
+    colorbar_legend=None,
+    cluster_rows=True,
+    cluster_cols=True,
+    metric="euclidean",
+):
+    """
+    Clustered heatmap of cell types vs samples.
+
+    Parameters
+    ----------
+    matrix : DataFrame
+        cell_type × sample matrix
+    cmap : str
+    scale : "linear" or "log"
+    figsize : tuple
+    colorbar_legend : str or None
+    cluster_rows : bool
+    cluster_cols : bool
+    """
+
+    data = matrix.copy()
+
+    if scale == "log":
+        data = np.log10(data + 0.1)
+
+    # --- scale handling ---
+    if scale == "linear":
+        vmin = 0
+        vmax = 50
+    elif scale == "log":
+        vmin = np.nanmin(data.values)
+        vmax = np.nanmax(data.values)
+    else:
+        vmin = np.nanmin(data.values)
+        vmax = np.nanmax(data.values)
+
+    # --- clustermap ---
+    g = sns.clustermap(
+        data,
+        cmap=cmap,
+        figsize=figsize,
+        row_cluster=cluster_rows,
+        col_cluster=cluster_cols,
+        vmin=vmin,
+        vmax=vmax,
+        xticklabels=True,
+        yticklabels=True,
+        cbar_pos=(0.02, 0.2, 0.02, 0.4),
+        metric=metric,
+    )
+
+    # --- rotate x labels ---
+    plt.setp(g.ax_heatmap.get_xticklabels(), rotation=45, ha="right")
+
+    # --- colorbar labeling ---
+    cbar = g.ax_cbar
+
+    # --- move ticks to left side ---
+    cbar.yaxis.set_ticks_position("left")
+    cbar.yaxis.set_label_position("left")
+
+    # --- label ---
+    if colorbar_legend is not None:
+        cbar.set_ylabel(colorbar_legend, fontsize=10, rotation=90, labelpad=10)
+
+    # --- tick logic ---
+    if scale == "linear":
+        ticks = [0, 25, 50]
+        labels = ["0", "25", "50"]
+    else:
+        vmin, vmax = data.values.min(), data.values.max()
+
+    ticks = np.linspace(vmin, vmax, 3)
+    labels = [f"{t:.1f}" for t in ticks]
+
+    cbar.set_yticks(ticks)
+    cbar.set_yticklabels(labels)
+
+    plt.show()
 
 def print_numeric_summary(df):
     """
@@ -258,7 +343,7 @@ def print_numeric_summary(df):
 
 def pivot_for_tissue_heatmap(df):
     df = df.copy()
-    df = df[~df["cell_type"].str.endswith("_Unassigned")]
+    df = df[~df["cell_type"].str.endswith("_unassigned")]
 
     # enforce biological order
     level_order = ["type", "intermediate", "subtype"]
@@ -287,3 +372,133 @@ def pivot_for_tissue_heatmap(df):
     matrix = matrix.reindex(ordered_rows)
 
     return matrix
+
+def plot_celltype_stacked_barplot(
+    df,
+    levels=None,
+    x="sample",  # "sample" or "tissue"
+    figsize=(10, 6),
+    title=None,
+    palette=None,
+    ylim=(0, 100),  # ← NEW
+
+):
+    """
+    Stacked barplot of cell type composition.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Must contain:
+        ['level', 'cell_type', 'pct_total']
+        + 'sample' or 'tissue' depending on x
+
+    levels : list[str] or None
+        Levels to include
+
+    x : str
+        Column to plot on x-axis ("sample" or "tissue")
+
+    figsize : tuple
+
+    title : str or None
+
+    palette : dict or None
+        Optional predefined {cell_type: color}
+    """
+
+    required = {"level", "cell_type", "pct_total", x}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    df = df.copy()
+
+    # --- filtering (match heatmap logic) ---
+    df = df[~df["cell_type"].str.endswith("_unassigned")]
+    df = df[df["cell_type"] != "B_plasmablast"]
+
+    if levels is not None:
+        df = df[df["level"].isin(levels)]
+
+    # --- pivot directly (no forced aggregation) ---
+    matrix = df.pivot_table(
+        index=x,
+        columns="cell_type",
+        values="pct_total",
+        fill_value=0.0,
+    )
+
+    # --- global abundance ordering ---
+    order = (
+        matrix.mean(axis=0)
+        .sort_values(ascending=False)
+        .index
+    )
+
+    matrix = matrix[order]
+
+    # --- palette (ORDERED) ---
+    if palette is None:
+        colors = sns.color_palette("tab20", n_colors=len(order))
+        palette = dict(zip(order, colors))
+    else:
+        # ensure missing types are added but keep order stable
+        missing = [ct for ct in order if ct not in palette]
+        if missing:
+            new_colors = sns.color_palette("tab20", n_colors=len(missing))
+            for ct, col in zip(missing, new_colors):
+                palette[ct] = col
+
+    # --- plotting ---
+    fig, ax = plt.subplots(figsize=figsize)
+
+    bottom = np.zeros(len(matrix))
+
+    for ct in matrix.columns:
+        values = matrix[ct].values
+        ax.bar(
+            range(len(matrix.index)),
+            values,
+            bottom=bottom,
+            color=palette[ct],
+            label=ct,
+            edgecolor="none",
+        )
+        bottom += values
+
+    # --- axes ---
+    ax.set_xticks(range(len(matrix.index)))
+    ax.set_xticklabels(matrix.index, rotation=45, ha="right")
+
+    ax.set_ylabel("Percentage of cells")
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+
+    # --- clean style ---
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(False)
+
+    # --- legend ---
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, color=palette[ct])
+        for ct in order[::-1]
+    ]
+
+    ax.legend(
+        handles,
+        order[::-1],
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left",
+        frameon=False,
+        title="Cell type",
+    )
+
+    if title:
+        ax.set_title(title)
+
+    plt.tight_layout()
+    plt.show()
+
+    return palette
