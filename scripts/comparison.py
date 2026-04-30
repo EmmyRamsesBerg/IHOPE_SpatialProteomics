@@ -429,6 +429,10 @@ def plot_celltype_stacked_barplot(
         fill_value=0.0,
     )
 
+    if ylim is not None and (matrix.sum(axis=1) > ylim[1]).any():
+        print("Warning! Some stacked bars exceed the specified ylim")
+
+
     # --- global abundance ordering ---
     order = (
         matrix.mean(axis=0)
