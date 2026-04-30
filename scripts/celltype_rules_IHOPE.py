@@ -71,6 +71,58 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
             | adata.obs["type_Endothelial"]
     )
 
+    # --- ENFORCE MUTUAL EXCLUSIVITY VIA PRECEDENCE ---
+
+    # Define priority (highest first)
+    priority = [
+        "type_T",
+        "type_B",
+        "type_Myeloid",
+        "type_NK",
+        "type_Endothelial",
+        "type_Stromal"
+    ]
+
+    type_cols = priority.copy()
+
+    # Apply precedence: higher priority "wins"
+    for i, higher in enumerate(priority):
+        for lower in priority[i + 1:]:
+            adata.obs[lower] = adata.obs[lower] & ~adata.obs[higher]
+
+    adata.obs["type_unclassified"] = ~(
+            adata.obs["type_T"]
+            | adata.obs["type_B"]
+            | adata.obs["type_NK"]
+            | adata.obs["type_Myeloid"]
+            | adata.obs["type_Stromal"]
+            | adata.obs["type_Endothelial"]
+    )
+
+    # --- VALIDATION: enforce strict single-label assignment ---
+
+    type_cols = [
+        "type_B",
+        "type_T",
+        "type_NK",
+        "type_Myeloid",
+        "type_Stromal",
+        "type_Endothelial",
+        "type_unclassified"
+    ]
+
+    type_sum = adata.obs[type_cols].sum(axis=1)
+
+    print("\n[TYPE VALIDATION]")
+    print("Counts of assignments per cell:")
+    print(type_sum.value_counts().sort_index())
+
+    if (type_sum != 1).any():
+        n_bad = (type_sum != 1).sum()
+        raise ValueError(f"TYPE assignment invalid: {n_bad} cells do not have exactly one label.")
+    else:
+        print("TYPE assignment is strictly exclusive (each cell has exactly one type)")
+
     # LEVEL 2: INTERMEDIATE STATES
 
     # T cells
@@ -478,12 +530,18 @@ def add_spatial_B_context(
         adata.obs["subtype_B_GC"]
         & adata.obs[follicle_key]
     )
-
     # Plasmablasts outside follicles
     adata.obs[output_pb_key] = (
-        adata.obs["subtype_B_plasmablast"]
-        & ~adata.obs[follicle_key]
+            adata.obs["subtype_B_plasmablast"]
+            & ~adata.obs[follicle_key]
     )
+
+    # Remove redundant cell types
+    if "subtype_B_plasmablast" in adata.obs.columns:
+        adata.obs.drop(columns=["subtype_B_plasmablast"], inplace=True)
+
+    if "subtype_B_GC" in adata.obs.columns:
+        adata.obs.drop(columns=["subtype_B_GC"], inplace=True)
 
     # Summary
     print("Spatial B-cell annotations added:")
