@@ -94,5 +94,4 @@ def load_and_build_anndata(file_path: str) -> ad.AnnData:
 
 
 def save_h5ad(adata: ad.AnnData, output_path: str):
-    """Optional save function (user decides if they want it)."""
     adata.write_h5ad(output_path)
