@@ -98,25 +98,6 @@ def plot_follicles(adata, sample_name, out_dir):
 
     plt.show()
 
-def detect_follicles_hdbscan_all_cells(
-    adata,
-    min_cluster_size=200
-):
-    """
-    Run HDBSCAN on ALL spatial points (no BANKSY filtering).
-    Returns cluster labels for all cells.
-    """
+import hdbscan
+import numpy as np
 
-    coords = adata.obsm["spatial"]
-
-    clusterer = hdbscan.HDBSCAN(
-        min_cluster_size=min_cluster_size
-    )
-
-    labels = clusterer.fit_predict(coords)
-
-    adata.obs["follicle_cluster_hdb"] = labels
-
-    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-
-    return adata, n_clusters
