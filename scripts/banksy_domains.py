@@ -1,10 +1,7 @@
-# bcell_follicle_analysis.py
-
 import pandas as pd
 from anndata import AnnData
 import matplotlib.pyplot as plt
 import numpy as np
-
 
 def compute_domain_bcell_stats(
     adata: AnnData,
@@ -63,9 +60,6 @@ def plot_domains_by_bcell_fraction(
     from red (high B) to blue (low B).
     Legend shows domain number and % B cells.
     """
-
-    import numpy as np
-
     x = adata.obsm["spatial"][:, 0]
     y = adata.obsm["spatial"][:, 1]
 

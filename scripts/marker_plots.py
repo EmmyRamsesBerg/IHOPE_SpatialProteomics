@@ -1,3 +1,5 @@
+import matplotlib.pyplot as plt
+
 def plot_marker_axes(
     adata: AnnData,
     x_marker: str,
