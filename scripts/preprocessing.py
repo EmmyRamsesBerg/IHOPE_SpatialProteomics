@@ -63,7 +63,6 @@ def clean_cell_columns(input_csv_path: str, output_csv_path: str, encoding: str 
 
 
 # Main preprocessing
-
 def preprocess(input_file: str, output_file: str | None = None, plot: bool = True):
     """
     Preprocess CSV by filtering cells based on area and DAPI intensity.

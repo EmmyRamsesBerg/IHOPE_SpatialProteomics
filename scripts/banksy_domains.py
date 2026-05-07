@@ -144,8 +144,6 @@ def assign_bcell_follicles(
 
     return adata
 
-
-
 def plot_bcell_follicles(
     adata: AnnData,
     follicle_key: str = "B_follicle",
