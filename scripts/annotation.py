@@ -146,12 +146,15 @@ def plot_marker_gmm_adata(adata: AnnData, thresholds: dict, gmms: dict = None,
         axes[i].text(0.95, 0.95, modality_label, transform=axes[i].transAxes,
                      ha='right', va='top', fontsize=8, bbox=dict(facecolor='white', alpha=0.7))
 
-        axes[i].set_title(f"{title_prefix}{marker}", fontsize=10)
+        axes[i].set_title(marker, fontsize=10)
         axes[i].set_xlabel("Value", fontsize=8)
         axes[i].set_ylabel("Density", fontsize=8)
 
     for j in range(i+1, len(axes)):
         fig.delaxes(axes[j])
+
+    if title_prefix:
+        fig.suptitle(title_prefix, fontsize=16, y=1.02)
 
     plt.tight_layout()
     plt.show()
