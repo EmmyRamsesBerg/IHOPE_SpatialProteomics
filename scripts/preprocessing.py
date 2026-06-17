@@ -1,4 +1,3 @@
-# New version 2026-03-11
 
 import os
 import numpy as np
@@ -96,13 +95,13 @@ def preprocess(input_file: str, output_file: str | None = None, plot: bool = Tru
 
         plt.subplot(1, 2, 1)
         plt.boxplot(
-            df[dapi_column].values,
+            df[dapi_column].dropna().values,
             vert=False,
             showfliers=False,
         )
         plt.xlim(
-            np.percentile(df[dapi_column], 0.5),
-            np.percentile(df[dapi_column], 99.5),
+            np.percentile(df[dapi_column].dropna(), 0.5),
+            np.percentile(df[dapi_column].dropna(), 99.5),
         )
         plt.title("Original DAPI")
 
