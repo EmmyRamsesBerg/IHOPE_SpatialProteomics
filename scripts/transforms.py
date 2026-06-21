@@ -71,7 +71,6 @@ def _plot_distributions(df, columns, title_prefix="", save_plot=True, output_pat
 
 
 def _arcsinh(df, columns, cofactor=5.0):
-    df_trans = df.copy()
     new_cols = []
     for col in columns:
         if col in df_trans.columns:
@@ -79,18 +78,17 @@ def _arcsinh(df, columns, cofactor=5.0):
             new_col = f"arcsinh_cf{cofactor}_{marker_name}"
             df_trans[new_col] = np.arcsinh(df_trans[col] / cofactor)
             new_cols.append(new_col)
-    return df_trans, new_cols
+    return df, new_cols
 
 def _zscore(df, columns):
-    df_trans = df.copy()
     new_cols = []
     for col in columns:
-        if col in df_trans.columns:
+        if col in df.columns:
             marker_name = col.replace(': Mean', '')
             new_col = f"z_{marker_name}"
-            df_trans[new_col] = zscore(df_trans[col])
+            df[new_col] = zscore(df[col])
             new_cols.append(new_col)
-    return df_trans, new_cols
+    return df, new_cols
 
 
 def apply_transform(input_file: str,
@@ -114,7 +112,7 @@ def apply_transform(input_file: str,
         metadata_cols: list of metadata columns
         fig: matplotlib figure of marker distributions
     """
-    df = pd.read_csv(input_file)
+    df = pd.read_csv(input_file, engine="python")
 
     marker_cols = [col for col in TARGET_COLUMNS if col in df.columns]
     metadata_cols = [col for col in df.columns if col not in marker_cols]

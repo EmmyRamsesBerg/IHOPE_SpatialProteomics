@@ -9,7 +9,7 @@ def spatial_celltype_plot(
     celltype_cols,
     x_coord="x",
     y_coord="y",
-    min_cells=15,
+    min_cells=0,
     figsize=(8, 8),
     alpha=0.6,
     size=10,
