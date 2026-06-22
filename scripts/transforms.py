@@ -14,10 +14,6 @@ from scipy.stats import zscore
 - Plots distributions of the transformed markers (optional).
 - Returns all components for use in notebook and downstream AnnData construction.
 
-Arguments:
-
-Returns: 
-
 '''
 
 
@@ -73,10 +69,10 @@ def _plot_distributions(df, columns, title_prefix="", save_plot=True, output_pat
 def _arcsinh(df, columns, cofactor=5.0):
     new_cols = []
     for col in columns:
-        if col in df_trans.columns:
+        if col in df.columns:
             marker_name = col.replace(': Mean', '')
             new_col = f"arcsinh_cf{cofactor}_{marker_name}"
-            df_trans[new_col] = np.arcsinh(df_trans[col] / cofactor)
+            df[new_col] = np.arcsinh(df[col] / cofactor)
             new_cols.append(new_col)
     return df, new_cols
 
@@ -110,12 +106,30 @@ def apply_transform(input_file: str,
         df_out: DataFrame with metadata + transformed columns
         marker_cols: list of transformed marker columns
         metadata_cols: list of metadata columns
-        fig: matplotlib figure of marker distributions
+        fig_raw: matplotlib figure of raw marker distributions
+        fig_normalized: matplotlib figure of transformed marker distributions
     """
     df = pd.read_csv(input_file, engine="python")
 
     marker_cols = [col for col in TARGET_COLUMNS if col in df.columns]
     metadata_cols = [col for col in df.columns if col not in marker_cols]
+
+    if save_plot:
+        fig_dir = "../results/figures"
+        os.makedirs(fig_dir, exist_ok=True)
+
+        base, ext = os.path.splitext(os.path.basename(input_file))
+        raw_plot_path = os.path.join(fig_dir, f"{base}_raw_distributions.png")
+    else:
+        raw_plot_path = None
+
+    fig_raw = _plot_distributions(
+        df,
+        marker_cols,
+        title_prefix="Raw ",
+        save_plot=save_plot,
+        output_path=raw_plot_path
+    )
 
     # Apply transformation
     if method.lower() == "arcsinh":
@@ -154,7 +168,7 @@ def apply_transform(input_file: str,
     else:
         plot_path = None
 
-    fig = _plot_distributions(
+    fig_normalized = _plot_distributions(
         df_out,
         transformed_cols,
         title_prefix=f"{label} ",
@@ -162,4 +176,4 @@ def apply_transform(input_file: str,
         output_path=plot_path
     )
 
-    return df_out, transformed_cols, metadata_cols, fig
+    return df_out, transformed_cols, metadata_cols, fig_raw, fig_normalized
