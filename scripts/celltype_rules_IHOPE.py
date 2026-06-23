@@ -178,8 +178,12 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
 
     # B cell subtypes
 
-    # GC B cells: CD20+, CD27+, CD38+
-    adata.obs["subtype_B_GC"] = (
+    # Naive B cells, copied from intermediate level so naive has a
+    # subtype-level label alongside follicular/extrafollicular memory
+    adata.obs["subtype_B_naive"] = adata.obs["intermediate_B_naive"]
+
+    # Follicular memory B cells (GC): CD20+, CD27+, CD38+
+    adata.obs["subtype_B_follicular_memory"] = (
         b
         & not_B_naive
         & adata.obs["CD20_pos"]
@@ -187,9 +191,9 @@ def assign_cell_types_bool_IHOPE(adata: AnnData):
         & adata.obs["CD38_pos"]
     )
 
-    # Plasmablasts:
+    # Extrafollicular memory B cells (plasmablasts):
     # CD45+, (CD20 OR CD79a)+, CD27+, CD38+, CD21-
-    adata.obs["subtype_B_plasmablast"] = (
+    adata.obs["subtype_B_extrafollicular_memory"] = (
         b
         & not_B_naive
         & adata.obs["CD27_pos"]
@@ -499,8 +503,10 @@ def add_TfH_like_cells(
 def add_spatial_B_context(
     adata: AnnData,
     follicle_key: str = "B_follicle",
-    output_gc_key: str = "subtype_B_GC_follicular",
-    output_pb_key: str = "subtype_B_plasmablast_extrafollicular",
+    input_follicular_memory_key: str = "subtype_B_follicular_memory",
+    input_extrafollicular_memory_key: str = "subtype_B_extrafollicular_memory",
+    output_gc_key: str = "subtype_B_follicular_memory",
+    output_pb_key: str = "subtype_B_extrafollicular_memory",
     plot: bool = False,
     size: float = 1.0,
     sample_name: str = "",
@@ -508,40 +514,36 @@ def add_spatial_B_context(
     """
     Add spatially refined B-cell subsets WITHOUT modifying existing annotations.
 
-    GC B (follicular):
-        subtype_B_GC AND inside follicle
+    Follicular memory B (GC):
+        marker-based follicular memory call AND inside follicle
 
-    Plasmablast (extrafollicular):
-        subtype_B_plasmablast AND outside follicle
+    Extrafollicular memory B (plasmablast):
+        marker-based extrafollicular memory call AND outside follicle
     """
 
     required_keys = [
         follicle_key,
-        "subtype_B_GC",
-        "subtype_B_plasmablast",
+        input_follicular_memory_key,
+        input_extrafollicular_memory_key,
     ]
 
     for key in required_keys:
         if key not in adata.obs:
             raise ValueError(f"{key} not found in adata.obs")
 
-    # GC B cells inside follicles
+    # Follicular memory B cells (GC) inside follicles
+    follicular_memory_marker_call = adata.obs[input_follicular_memory_key]
+    extrafollicular_memory_marker_call = adata.obs[input_extrafollicular_memory_key]
+
     adata.obs[output_gc_key] = (
-        adata.obs["subtype_B_GC"]
+        follicular_memory_marker_call
         & adata.obs[follicle_key]
     )
-    # Plasmablasts outside follicles
+    # Extrafollicular memory B cells (plasmablast) outside follicles
     adata.obs[output_pb_key] = (
-            adata.obs["subtype_B_plasmablast"]
+            extrafollicular_memory_marker_call
             & ~adata.obs[follicle_key]
     )
-
-    # Remove redundant cell types
-    if "subtype_B_plasmablast" in adata.obs.columns:
-        adata.obs.drop(columns=["subtype_B_plasmablast"], inplace=True)
-
-    if "subtype_B_GC" in adata.obs.columns:
-        adata.obs.drop(columns=["subtype_B_GC"], inplace=True)
 
     # Summary
     print("Spatial B-cell annotations added:")
@@ -565,10 +567,10 @@ def add_spatial_B_context(
         plt.scatter(x[f], y[f], s=size * 2, c="orange", alpha=0.4, label="Follicle")
 
         gc = adata.obs[output_gc_key]
-        plt.scatter(x[gc], y[gc], s=size * 4, c="blue", label="GC (follicular)")
+        plt.scatter(x[gc], y[gc], s=size * 4, c="blue", label="Follicular memory (GC)")
 
         pb = adata.obs[output_pb_key]
-        plt.scatter(x[pb], y[pb], s=size * 4, c="red", label="Plasmablast (extra-follicular)")
+        plt.scatter(x[pb], y[pb], s=size * 4, c="red", label="Extrafollicular memory (plasmablast)")
 
         plt.gca().invert_yaxis()
         plt.axis("equal")

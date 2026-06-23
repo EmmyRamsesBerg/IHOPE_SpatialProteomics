@@ -8,6 +8,13 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 #TODO change name to match functionality
 
+# Label formatting
+
+def _display_label(cell_type):
+    """Convert a cell_type string to a display-friendly label (underscores to spaces)."""
+    return cell_type.replace("_", " ")
+
+
 # Colormap utility
 
 def truncate_cmap(cmap_name, minval=0.15, maxval=1.0, n=256):
@@ -304,7 +311,7 @@ def plot_celltype_heatmap(
     )
 
     ax.set_yticks(range(n_rows))
-    ax.set_yticklabels(matrix.index, fontsize=8)
+    ax.set_yticklabels([_display_label(ct) for ct in matrix.index], fontsize=8)
     ax.set_xticks(range(n_cols))
     ax.set_xticklabels(matrix.columns, rotation=45, ha="right", fontsize=9)
 
@@ -384,6 +391,7 @@ def plot_celltype_clustermap(
         Distance metric for clustering (e.g. "euclidean", "correlation").
     """
     data = matrix.copy()
+    data.index = [_display_label(ct) for ct in data.index]
 
     used_cmap = truncate_cmap(cmap, minval=cmap_minval)
 
@@ -450,6 +458,46 @@ def print_numeric_summary(df):
 
 # Stacked barplot
 
+# Structural/non-immune cell types excluded when immune_only=True.
+# Single source of truth, reused later by heatmap and strip plot functions.
+STRUCTURAL_CELL_TYPES = [
+    "Blood_Endothelial",
+    "Lymphatic_Endothelial",
+    "Basement_Membrane",
+    "Fibroblast",
+    "Stromal",
+]
+
+# Lineage subsets for breakdown plots, keyed by subtype level cell_type names.
+# Update the B list once the naive/follicular memory/extrafollicular memory
+# relabelling is finalised.
+LINEAGE_SUBSETS = {
+    "T": [
+        "Activated_CD4", "Activated_CD8", "TCM_CD4", "TCM_CD8",
+        "TEM_CD4", "TEM_CD8", "TEMRA_CD4", "TEMRA_CD8",
+        "TN_CD4", "TN_CD8", "Treg", "TfH_like", "T_terminal",
+    ],
+    "B": [
+        "B_GC_follicular",
+        "B_plasmablast_extrafollicular",
+    ],
+    "Myeloid": [
+        "Monocyte_Macrophage", "cDC1", "cDC2",
+    ],
+}
+
+
+def _rescale_to_100(df, group_cols):
+    """
+    Recalculate pct_total so it sums to 100 within each group defined
+    by group_cols (e.g. ["sample"] or ["tissue"]).
+    """
+    df = df.copy()
+    group_sums = df.groupby(group_cols)["pct_total"].transform("sum")
+    df["pct_total"] = df["pct_total"] / group_sums * 100
+    return df
+
+
 def plot_celltype_stacked_barplot(
     df,
     levels=None,
@@ -458,6 +506,8 @@ def plot_celltype_stacked_barplot(
     title=None,
     palette=None,
     ylim=(0, 100),
+    immune_only=False,
+    lineage_subset=None,
 ):
     """
     Stacked barplot of cell type composition.
@@ -479,6 +529,18 @@ def plot_celltype_stacked_barplot(
     ylim : tuple or None
         Y-axis limits. A warning is printed if any bar exceeds the upper
         limit.
+    immune_only : bool
+        If True, drop structural cell types and unclassified cells, then
+        rescale remaining percentages to sum to 100 within each x-group.
+        Y-axis label switches to "Percentage of immune cells (CD45+)".
+        Default False keeps current behaviour (all cell types, no
+        rescaling, y-axis labelled "Percentage of cells"). Ignored if
+        lineage_subset is set.
+    lineage_subset : str or None
+        One of "T", "B", "Myeloid" (see LINEAGE_SUBSETS). If set, the
+        plot is restricted to that lineage's subtypes only and rescaled
+        so they sum to 100 within each x-group. Y-axis label becomes
+        "Percentage of {lineage} cells".
     """
     required = {"level", "cell_type", "pct_total", x}
     missing = required - set(df.columns)
@@ -492,6 +554,23 @@ def plot_celltype_stacked_barplot(
     if levels is not None:
         df = df[df["level"].isin(levels)]
 
+    ylabel = "Percentage of cells"
+
+    if lineage_subset is not None:
+        if lineage_subset not in LINEAGE_SUBSETS:
+            raise ValueError(
+                f"lineage_subset must be one of {list(LINEAGE_SUBSETS)}"
+            )
+        df = df[df["cell_type"].isin(LINEAGE_SUBSETS[lineage_subset])]
+        ylabel = f"Percentage of {lineage_subset} cells"
+        df = _rescale_to_100(df, group_cols=[x])
+
+    elif immune_only:
+        df = df[~df["cell_type"].isin(STRUCTURAL_CELL_TYPES)]
+        df = df[df["cell_type"] != "unclassified"]
+        ylabel = "Percentage of immune cells (CD45+)"
+        df = _rescale_to_100(df, group_cols=[x])
+
     matrix = df.pivot_table(
         index=x,
         columns="cell_type",
@@ -499,7 +578,7 @@ def plot_celltype_stacked_barplot(
         fill_value=0.0,
     )
 
-    if ylim is not None and (matrix.sum(axis=1) > ylim[1]).any():
+    if ylim is not None and (matrix.sum(axis=1) > ylim[1] + 0.5).any():
         print("Warning: some stacked bars exceed the specified ylim upper bound.")
 
     order = matrix.mean(axis=0).sort_values(ascending=False).index
@@ -532,7 +611,7 @@ def plot_celltype_stacked_barplot(
 
     ax.set_xticks(range(len(matrix.index)))
     ax.set_xticklabels(matrix.index, rotation=45, ha="right")
-    ax.set_ylabel("Percentage of cells")
+    ax.set_ylabel(ylabel)
 
     if ylim is not None:
         ax.set_ylim(*ylim)
@@ -544,7 +623,7 @@ def plot_celltype_stacked_barplot(
     handles = [plt.Rectangle((0, 0), 1, 1, color=palette[ct]) for ct in order[::-1]]
     ax.legend(
         handles,
-        order[::-1],
+        [_display_label(ct) for ct in order[::-1]],
         bbox_to_anchor=(1.02, 1),
         loc="upper left",
         frameon=False,
@@ -559,4 +638,4 @@ def plot_celltype_stacked_barplot(
 
     return palette
 
-#TODO add strip plot function with dot colors by donor (add donor first)
+#TODO add strip plot function with dot colors by donor (needs donor column added at load step)
