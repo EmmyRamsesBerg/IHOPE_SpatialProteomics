@@ -502,6 +502,7 @@ def plot_celltype_clustermap(
     )
 
     plt.setp(g.ax_heatmap.get_xticklabels(), rotation=45, ha="right")
+    g.ax_heatmap.set_xlabel("")
 
     cbar = g.ax_cbar
     cbar.yaxis.set_ticks_position("left")
