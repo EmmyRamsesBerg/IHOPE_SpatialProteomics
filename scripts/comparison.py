@@ -6,8 +6,6 @@ import matplotlib.colors as mcolors
 import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-#TODO change name to match functionality
-
 # Label formatting
 
 def _display_label(cell_type):
@@ -35,7 +33,7 @@ def truncate_cmap(cmap_name, minval=0.15, maxval=1.0, n=256):
     n : int
         Number of colour steps in the output map.
     """
-    base = plt.cm.get_cmap(cmap_name)
+    base = plt.colormaps[cmap_name]
     return mcolors.LinearSegmentedColormap.from_list(
         f"trunc({cmap_name},{minval:.2f},{maxval:.2f})",
         base(np.linspace(minval, maxval, n)),
@@ -289,7 +287,11 @@ def pivot_for_tissue_heatmap(
         rows. Used as a secondary sort key within each level. When None
         (default), rows fall back to alphabetical order within level.
     """
-    df = df.copy()
+    required = {"tissue", "level", "cell_type", "pct_total"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
     df = _apply_exclusions(
         df, drop_unassigned, drop_unclassified, renormalise,
         immune_only, structural_cell_types,
@@ -297,10 +299,7 @@ def pivot_for_tissue_heatmap(
 
     level_order = ["type", "intermediate", "subtype"]
     df["level"] = pd.Categorical(df["level"], categories=level_order, ordered=True)
-    df["_order"] = df["cell_type"].map(
-        lambda ct: _manual_order_position(ct, celltype_order)
-    )
-    df = df.sort_values(["level", "_order", "cell_type"])
+    df = df.sort_values(["level", "cell_type"])
 
     matrix = df.pivot_table(
         index="cell_type",
@@ -309,13 +308,19 @@ def pivot_for_tissue_heatmap(
         fill_value=0.0,
     )
 
-    ordered_rows = (
-        df[["level", "_order", "cell_type"]]
-        .drop_duplicates()
-        .sort_values(["level", "_order", "cell_type"])["cell_type"]
-        .tolist()
-    )
-    matrix = matrix.reindex(ordered_rows)
+    level_rank = {"type": 0, "intermediate": 1, "subtype": 2}
+    level_lookup = df.drop_duplicates("cell_type").set_index("cell_type")["level"]
+
+    matrix = matrix.loc[
+        sorted(
+            matrix.index,
+            key=lambda x: (
+                level_rank.get(level_lookup.loc[x], 99),
+                _manual_order_position(x, celltype_order),
+                x,
+            ),
+        )
+    ]
 
     return matrix
 
@@ -580,6 +585,7 @@ def plot_celltype_stacked_barplot(
     lineage_subset=None,
     structural_cell_types=None,
     lineage_subsets=None,
+    drop_unclassified=False,
 ):
     """
     Stacked barplot of cell type composition.
@@ -619,6 +625,11 @@ def plot_celltype_stacked_barplot(
     lineage_subsets : dict[str, list[str]] or None
         Mapping of lineage name to its subtype cell_type names. Required when
         lineage_subset is set. Defined in the notebook.
+    drop_unclassified : bool
+        If True, drop the 'unclassified' category and rescale the remaining
+        percentages to sum to 100 within each x-group. Ignored if
+        immune_only or lineage_subset is set, since both already exclude
+        unclassified as part of their own rescaling. Default False.
     """
     required = {"level", "cell_type", "pct_total", x}
     missing = required - set(df.columns)
@@ -657,6 +668,11 @@ def plot_celltype_stacked_barplot(
         df = df[~df["cell_type"].isin(structural_cell_types)]
         df = df[df["cell_type"] != "unclassified"]
         ylabel = "Percentage of immune cells (CD45+)"
+        df = _rescale_to_100(df, group_cols=[x])
+
+    elif drop_unclassified:
+        df = df[df["cell_type"] != "unclassified"]
+        ylabel = "Percentage of cells (unclassified excluded)"
         df = _rescale_to_100(df, group_cols=[x])
 
     matrix = df.pivot_table(
