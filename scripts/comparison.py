@@ -107,7 +107,8 @@ def load_celltype_summaries(
 
 # Pivot helpers
 
-def _apply_exclusions(df, drop_unassigned, drop_unclassified, renormalise):
+def _apply_exclusions(df, drop_unassigned, drop_unclassified, renormalise,
+                      immune_only=False, structural_cell_types=None):
     """
     Shared filtering and optional renormalisation used by both pivot functions.
 
@@ -121,7 +122,16 @@ def _apply_exclusions(df, drop_unassigned, drop_unclassified, renormalise):
     renormalise : bool
         If True AND at least one category was dropped, recalculate
         pct_total so values sum to 100 within each (sample, level) group.
-        Ignored when both drop flags are False.
+        Ignored when nothing was dropped.
+    immune_only : bool
+        If True, restrict to the subtype level and drop the structural cell
+        types (given by structural_cell_types) and unclassified. Pair with
+        renormalise=True to make remaining percentages sum to 100 within
+        each (sample, level) group (i.e. percentage of immune cells).
+    structural_cell_types : list[str] or None
+        Cell type names to treat as structural and drop when immune_only is
+        True. Required when immune_only is True. Defined in the notebook so
+        the biology stays out of this script.
 
     Returns
     -------
@@ -129,6 +139,20 @@ def _apply_exclusions(df, drop_unassigned, drop_unclassified, renormalise):
     """
     df = df.copy()
     dropped_anything = False
+
+    if immune_only:
+        if structural_cell_types is None:
+            raise ValueError(
+                "immune_only=True requires structural_cell_types to be "
+                "provided (the list of structural cell types to drop)."
+            )
+        df = df[df["level"] == "subtype"]
+        struct_mask = df["cell_type"].isin(structural_cell_types)
+        unclass_mask = df["cell_type"] == "unclassified"
+        mask = struct_mask | unclass_mask
+        if mask.any():
+            df = df[~mask]
+            dropped_anything = True
 
     if drop_unassigned:
         mask = df["cell_type"].str.endswith("_unassigned")
@@ -143,7 +167,8 @@ def _apply_exclusions(df, drop_unassigned, drop_unclassified, renormalise):
             dropped_anything = True
 
     if renormalise and dropped_anything:
-        group_sums = df.groupby(["sample", "level"])["pct_total"].transform("sum")
+        group_col = "sample" if "sample" in df.columns else "tissue"
+        group_sums = df.groupby([group_col, "level"])["pct_total"].transform("sum")
         df["pct_total"] = df["pct_total"] / group_sums * 100
 
     return df
@@ -154,11 +179,15 @@ def pivot_for_heatmap(
     drop_unassigned=True,
     drop_unclassified=False,
     renormalise=False,
+    immune_only=False,
+    structural_cell_types=None,
+    celltype_order=None,
 ):
     """
     Pivot combined cell-type summaries into a heatmap-ready matrix.
 
-    Rows    : cell_type (ordered type → intermediate → subtype, then alpha)
+    Rows    : cell_type (ordered type → intermediate → subtype, then by
+              celltype_order within level, then alpha)
     Columns : sample
     Values  : pct_total
 
@@ -172,13 +201,27 @@ def pivot_for_heatmap(
     renormalise : bool
         Recalculate percentages after dropping so each (sample, level)
         group sums to 100. Default False.
+    immune_only : bool
+        Restrict to the subtype level and drop structural and unclassified
+        cells. Requires structural_cell_types. Pair with renormalise=True
+        for percentage of immune cells. Default False.
+    structural_cell_types : list[str] or None
+        Structural cell types to drop when immune_only is True. Defined in
+        the notebook.
+    celltype_order : list[str] or None
+        Manual display order for grouping related cell types as heatmap
+        rows. Used as a secondary sort key within each level. When None
+        (default), rows fall back to alphabetical order within level.
     """
     required = {"sample", "level", "cell_type", "pct_total"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
 
-    df = _apply_exclusions(df, drop_unassigned, drop_unclassified, renormalise)
+    df = _apply_exclusions(
+        df, drop_unassigned, drop_unclassified, renormalise,
+        immune_only, structural_cell_types,
+    )
 
     level_order = ["type", "intermediate", "subtype"]
     df["level"] = pd.Categorical(df["level"], categories=level_order, ordered=True)
@@ -197,7 +240,11 @@ def pivot_for_heatmap(
     matrix = matrix.loc[
         sorted(
             matrix.index,
-            key=lambda x: (level_rank.get(level_lookup.loc[x], 99), x),
+            key=lambda x: (
+                level_rank.get(level_lookup.loc[x], 99),
+                _manual_order_position(x, celltype_order),
+                x,
+            ),
         )
     ]
 
@@ -209,11 +256,15 @@ def pivot_for_tissue_heatmap(
     drop_unassigned=True,
     drop_unclassified=False,
     renormalise=False,
+    immune_only=False,
+    structural_cell_types=None,
+    celltype_order=None,
 ):
     """
     Pivot tissue-aggregated summaries into a heatmap-ready matrix.
 
-    Rows    : cell_type (ordered type → intermediate → subtype, then alpha)
+    Rows    : cell_type (ordered type → intermediate → subtype, then by
+              celltype_order within level, then alpha)
     Columns : tissue
     Values  : pct_total (already averaged over samples upstream)
 
@@ -226,13 +277,30 @@ def pivot_for_tissue_heatmap(
     renormalise : bool
         Recalculate percentages after dropping so each (tissue, level)
         group sums to 100. Default False.
+    immune_only : bool
+        Restrict to the subtype level and drop structural and unclassified
+        cells. Requires structural_cell_types. Pair with renormalise=True
+        for percentage of immune cells. Default False.
+    structural_cell_types : list[str] or None
+        Structural cell types to drop when immune_only is True. Defined in
+        the notebook.
+    celltype_order : list[str] or None
+        Manual display order for grouping related cell types as heatmap
+        rows. Used as a secondary sort key within each level. When None
+        (default), rows fall back to alphabetical order within level.
     """
     df = df.copy()
-    df = _apply_exclusions(df, drop_unassigned, drop_unclassified, renormalise)
+    df = _apply_exclusions(
+        df, drop_unassigned, drop_unclassified, renormalise,
+        immune_only, structural_cell_types,
+    )
 
     level_order = ["type", "intermediate", "subtype"]
     df["level"] = pd.Categorical(df["level"], categories=level_order, ordered=True)
-    df = df.sort_values(["level", "cell_type"])
+    df["_order"] = df["cell_type"].map(
+        lambda ct: _manual_order_position(ct, celltype_order)
+    )
+    df = df.sort_values(["level", "_order", "cell_type"])
 
     matrix = df.pivot_table(
         index="cell_type",
@@ -242,9 +310,9 @@ def pivot_for_tissue_heatmap(
     )
 
     ordered_rows = (
-        df[["level", "cell_type"]]
+        df[["level", "_order", "cell_type"]]
         .drop_duplicates()
-        .sort_values(["level", "cell_type"])["cell_type"]
+        .sort_values(["level", "_order", "cell_type"])["cell_type"]
         .tolist()
     )
     matrix = matrix.reindex(ordered_rows)
@@ -262,6 +330,7 @@ def plot_celltype_heatmap(
     title=None,
     colorbar_legend=None,
     scale="linear",
+    vmax=None,
 ):
     """
     Static heatmap of cell types × samples (or tissues).
@@ -280,6 +349,11 @@ def plot_celltype_heatmap(
     title : str or None
     colorbar_legend : str or None
     scale : "linear" or "log"
+    vmax : float or None
+        Upper limit of the linear colour scale. When None (default), it is
+        taken from the actual data maximum so the scale adapts to the range
+        present (e.g. after rescaling to percentage of immune cells). Ignored
+        for log scale. Pass a number to fix the scale across figures.
     """
     n_rows, n_cols = matrix.shape
 
@@ -293,7 +367,8 @@ def plot_celltype_heatmap(
     used_cmap = truncate_cmap(cmap, minval=cmap_minval)
 
     if scale == "linear":
-        vmin, vmax = 0, 50
+        vmin = 0
+        vmax = float(np.nanmax(matrix.values)) if vmax is None else vmax
     elif scale == "log":
         vmin = np.nanmin(matrix.values)
         vmax = np.nanmax(matrix.values)
@@ -338,12 +413,13 @@ def plot_celltype_heatmap(
 
     vmin_actual, vmax_actual = im.get_clim()
     if scale == "linear":
-        if vmax_actual <= 1:
-            ticks, labels = [0, 0.5, 1], ["0", "0.5", "1"]
-        elif vmax_actual <= 50:
-            ticks, labels = [0, 25, 50], ["0", "25", "50"]
+        mid = vmax_actual / 2
+        ticks = [0, mid, vmax_actual]
+        # Whole numbers when the range is wide, one decimal when small
+        if vmax_actual >= 10:
+            labels = [f"{t:.0f}" for t in ticks]
         else:
-            ticks, labels = [0, 50, 100], ["0", "50", "100"]
+            labels = [f"{t:.1f}" for t in ticks]
     else:
         ticks = np.linspace(vmin_actual, vmax_actual, 3)
         labels = [f"{t:.1f}" for t in ticks]
@@ -370,6 +446,7 @@ def plot_celltype_clustermap(
     cluster_rows=True,
     cluster_cols=True,
     metric="euclidean",
+    vmax=None,
 ):
     """
     Clustered heatmap of cell types × samples.
@@ -389,6 +466,9 @@ def plot_celltype_clustermap(
     cluster_cols : bool
     metric : str
         Distance metric for clustering (e.g. "euclidean", "correlation").
+    vmax : float or None
+        Upper limit of the linear colour scale. When None (default), taken
+        from the actual data maximum. Ignored for log scale.
     """
     data = matrix.copy()
     data.index = [_display_label(ct) for ct in data.index]
@@ -396,7 +476,8 @@ def plot_celltype_clustermap(
     used_cmap = truncate_cmap(cmap, minval=cmap_minval)
 
     if scale == "linear":
-        vmin, vmax = 0, 50
+        vmin = 0
+        vmax = float(np.nanmax(data.values)) if vmax is None else vmax
     else:
         vmin = np.nanmin(data.values)
         vmax = np.nanmax(data.values)
@@ -424,11 +505,13 @@ def plot_celltype_clustermap(
     if colorbar_legend is not None:
         cbar.set_ylabel(colorbar_legend, fontsize=10, rotation=90, labelpad=10)
 
-    # Fixed: linear and non-linear cases are now fully separate branches;
-    # the old code fell through so linear always got data-driven ticks.
     if scale == "linear":
-        ticks = [0, 25, 50]
-        labels = ["0", "25", "50"]
+        mid = vmax / 2
+        ticks = [0, mid, vmax]
+        if vmax >= 10:
+            labels = [f"{t:.0f}" for t in ticks]
+        else:
+            labels = [f"{t:.1f}" for t in ticks]
     else:
         ticks = np.linspace(vmin, vmax, 3)
         labels = [f"{t:.1f}" for t in ticks]
@@ -458,33 +541,20 @@ def print_numeric_summary(df):
 
 # Stacked barplot
 
-# Structural/non-immune cell types excluded when immune_only=True.
-# Single source of truth, reused later by heatmap and strip plot functions.
-STRUCTURAL_CELL_TYPES = [
-    "Blood_Endothelial",
-    "Lymphatic_Endothelial",
-    "Basement_Membrane",
-    "Fibroblast",
-    "Stromal",
-]
+def _manual_order_position(cell_type, celltype_order):
+    """
+    Return the index of cell_type in celltype_order, or a large number if
+    not listed (so unlisted types sort after the listed ones). When
+    celltype_order is None or empty, returns 0 for everything, so callers
+    fall back to their alphabetical tiebreaker (no manual grouping).
+    """
+    if not celltype_order:
+        return 0
+    try:
+        return celltype_order.index(cell_type)
+    except ValueError:
+        return len(celltype_order)
 
-# Lineage subsets for breakdown plots, keyed by subtype level cell_type names.
-# Update the B list once the naive/follicular memory/extrafollicular memory
-# relabelling is finalised.
-LINEAGE_SUBSETS = {
-    "T": [
-        "Activated_CD4", "Activated_CD8", "TCM_CD4", "TCM_CD8",
-        "TEM_CD4", "TEM_CD8", "TEMRA_CD4", "TEMRA_CD8",
-        "TN_CD4", "TN_CD8", "Treg", "TfH_like", "T_terminal",
-    ],
-    "B": [
-        "B_GC_follicular",
-        "B_plasmablast_extrafollicular",
-    ],
-    "Myeloid": [
-        "Monocyte_Macrophage", "cDC1", "cDC2",
-    ],
-}
 
 
 def _rescale_to_100(df, group_cols):
@@ -508,6 +578,8 @@ def plot_celltype_stacked_barplot(
     ylim=(0, 100),
     immune_only=False,
     lineage_subset=None,
+    structural_cell_types=None,
+    lineage_subsets=None,
 ):
     """
     Stacked barplot of cell type composition.
@@ -530,17 +602,23 @@ def plot_celltype_stacked_barplot(
         Y-axis limits. A warning is printed if any bar exceeds the upper
         limit.
     immune_only : bool
-        If True, drop structural cell types and unclassified cells, then
-        rescale remaining percentages to sum to 100 within each x-group.
-        Y-axis label switches to "Percentage of immune cells (CD45+)".
-        Default False keeps current behaviour (all cell types, no
-        rescaling, y-axis labelled "Percentage of cells"). Ignored if
+        If True, drop structural cell types (given by structural_cell_types)
+        and unclassified cells, then rescale remaining percentages to sum to
+        100 within each x-group. Y-axis label switches to "Percentage of
+        immune cells (CD45+)". Requires structural_cell_types. Default False
+        keeps current behaviour (all cell types, no rescaling). Ignored if
         lineage_subset is set.
     lineage_subset : str or None
-        One of "T", "B", "Myeloid" (see LINEAGE_SUBSETS). If set, the
-        plot is restricted to that lineage's subtypes only and rescaled
-        so they sum to 100 within each x-group. Y-axis label becomes
-        "Percentage of {lineage} cells".
+        A key into lineage_subsets (e.g. "T", "B", "Myeloid"). If set, the
+        plot is restricted to that lineage's subtypes only and rescaled so
+        they sum to 100 within each x-group. Requires lineage_subsets.
+        Y-axis label becomes "Percentage of {lineage} cells".
+    structural_cell_types : list[str] or None
+        Structural cell types to drop when immune_only is True. Defined in
+        the notebook.
+    lineage_subsets : dict[str, list[str]] or None
+        Mapping of lineage name to its subtype cell_type names. Required when
+        lineage_subset is set. Defined in the notebook.
     """
     required = {"level", "cell_type", "pct_total", x}
     missing = required - set(df.columns)
@@ -557,16 +635,26 @@ def plot_celltype_stacked_barplot(
     ylabel = "Percentage of cells"
 
     if lineage_subset is not None:
-        if lineage_subset not in LINEAGE_SUBSETS:
+        if lineage_subsets is None:
             raise ValueError(
-                f"lineage_subset must be one of {list(LINEAGE_SUBSETS)}"
+                "lineage_subset requires lineage_subsets (the mapping of "
+                "lineage name to its subtype cell types) to be provided."
             )
-        df = df[df["cell_type"].isin(LINEAGE_SUBSETS[lineage_subset])]
+        if lineage_subset not in lineage_subsets:
+            raise ValueError(
+                f"lineage_subset must be one of {list(lineage_subsets)}"
+            )
+        df = df[df["cell_type"].isin(lineage_subsets[lineage_subset])]
         ylabel = f"Percentage of {lineage_subset} cells"
         df = _rescale_to_100(df, group_cols=[x])
 
     elif immune_only:
-        df = df[~df["cell_type"].isin(STRUCTURAL_CELL_TYPES)]
+        if structural_cell_types is None:
+            raise ValueError(
+                "immune_only=True requires structural_cell_types (the list "
+                "of structural cell types to drop) to be provided."
+            )
+        df = df[~df["cell_type"].isin(structural_cell_types)]
         df = df[df["cell_type"] != "unclassified"]
         ylabel = "Percentage of immune cells (CD45+)"
         df = _rescale_to_100(df, group_cols=[x])
@@ -638,4 +726,4 @@ def plot_celltype_stacked_barplot(
 
     return palette
 
-#TODO add strip plot function with dot colors by donor (needs donor column added at load step)
+#TODO add violin plot function with dot colors by donor
