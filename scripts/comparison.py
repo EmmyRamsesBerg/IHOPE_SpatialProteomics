@@ -565,10 +565,18 @@ def _manual_order_position(cell_type, celltype_order):
 
 def _rescale_to_100(df, group_cols):
     """
-    Recalculate pct_total so it sums to 100 within each group defined
-    by group_cols (e.g. ["sample"] or ["tissue"]).
+    Recalculate pct_total so it sums to 100 within each group.
+
+    Always rescales per sample when a 'sample' column is present, even if
+    the caller's x-axis grouping is something else (e.g. "tissue"). This
+    matters when a per-sample dataframe is passed with x="tissue" and the
+    tissue-level averaging is meant to happen afterwards in the pivot, not
+    here. Falls back to group_cols when there is no 'sample' column (e.g.
+    an already tissue-aggregated dataframe).
     """
     df = df.copy()
+    if "sample" in df.columns:
+        group_cols = ["sample"]
     group_sums = df.groupby(group_cols)["pct_total"].transform("sum")
     df["pct_total"] = df["pct_total"] / group_sums * 100
     return df
