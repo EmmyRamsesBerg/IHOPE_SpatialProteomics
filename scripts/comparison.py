@@ -540,12 +540,16 @@ def plot_celltype_clustermap(
         vmin = np.nanmin(data.values)
         vmax = np.nanmax(data.values)
 
+    row_ratio = 0.2 if cluster_rows else 0.02
+    col_ratio = 0.2 if cluster_cols else 0.02
+
     g = sns.clustermap(
         data,
         cmap=used_cmap,
         figsize=figsize,
         row_cluster=cluster_rows,
         col_cluster=cluster_cols,
+        dendrogram_ratio=(row_ratio, col_ratio),
         vmin=vmin,
         vmax=vmax,
         xticklabels=True,
@@ -556,6 +560,20 @@ def plot_celltype_clustermap(
 
     plt.setp(g.ax_heatmap.get_xticklabels(), rotation=45, ha="right")
     g.ax_heatmap.set_xlabel("")
+
+    # Reposition the colorbar relative to the heatmap's actual bounding
+    # box, rather than the fixed figure coordinates seaborn defaults to,
+    # so it stays close to the plot and vertically centred on it instead
+    # of trailing down to the x-axis label area.
+    heatmap_pos = g.ax_heatmap.get_position()
+    leftmost = (
+        g.ax_row_dendrogram.get_position().x0 if cluster_rows else heatmap_pos.x0
+    )
+    cbar_width = 0.02
+    cbar_height = heatmap_pos.height * 0.3
+    cbar_left = leftmost - cbar_width - 0.01
+    cbar_bottom = heatmap_pos.y0 + (heatmap_pos.height - cbar_height) / 2
+    g.ax_cbar.set_position([cbar_left, cbar_bottom, cbar_width, cbar_height])
 
     cbar = g.ax_cbar
     cbar.yaxis.set_ticks_position("left")
