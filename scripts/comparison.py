@@ -39,6 +39,27 @@ def truncate_cmap(cmap_name, minval=0.15, maxval=1.0, n=256):
         base(np.linspace(minval, maxval, n)),
     )
 
+def _nice_step(value):
+    """
+    Pick an evenly spaced tick step appropriate for a 0-to-value colour
+    scale, so ticks land on clean numbers (5s, 10s, 20s, ...) rather
+    than arbitrary fractions.
+    """
+    if value <= 0:
+        return 1.0
+    if value <= 20:
+        return 5.0
+    elif value <= 100:
+        return 20.0
+    elif value <= 500:
+        return 100.0
+    else:
+        return float(10 ** np.floor(np.log10(value)))
+
+
+def _round_up_to_step(value, step):
+    """Round value up to the nearest multiple of step."""
+    return float(np.ceil(value / step) * step)
 
 # Data loading
 
@@ -373,7 +394,12 @@ def plot_celltype_heatmap(
 
     if scale == "linear":
         vmin = 0
-        vmax = float(np.nanmax(matrix.values)) if vmax is None else vmax
+        if vmax is None:
+            raw_max = float(np.nanmax(matrix.values))
+            tick_step = _nice_step(raw_max)
+            vmax = _round_up_to_step(raw_max, tick_step)
+        else:
+            tick_step = _nice_step(vmax)
     elif scale == "log":
         vmin = np.nanmin(matrix.values)
         vmax = np.nanmax(matrix.values)
@@ -403,8 +429,8 @@ def plot_celltype_heatmap(
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("top", size="3%", pad=0.3)
     cbar = fig.colorbar(im, cax=cax, orientation="horizontal")
-    cax.xaxis.set_ticks_position("top")
-    cax.xaxis.set_label_position("top")
+    cax.xaxis.set_ticks_position("bottom")
+    cax.xaxis.set_label_position("bottom")
 
     if colorbar_legend is not None:
         cbar.ax.text(
@@ -418,16 +444,12 @@ def plot_celltype_heatmap(
 
     vmin_actual, vmax_actual = im.get_clim()
     if scale == "linear":
-        mid = vmax_actual / 2
-        ticks = [0, mid, vmax_actual]
+        ticks = np.arange(tick_step, vmax_actual + tick_step / 2, tick_step)
         # Whole numbers when the range is wide, one decimal when small
         if vmax_actual >= 10:
             labels = [f"{t:.0f}" for t in ticks]
         else:
             labels = [f"{t:.1f}" for t in ticks]
-    else:
-        ticks = np.linspace(vmin_actual, vmax_actual, 3)
-        labels = [f"{t:.1f}" for t in ticks]
 
     cbar.set_ticks(ticks)
     cbar.set_ticklabels(labels)
