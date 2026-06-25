@@ -201,6 +201,7 @@ def pivot_for_heatmap(
     immune_only=False,
     structural_cell_types=None,
     celltype_order=None,
+    tissue_order=None,
 ):
     """
     Pivot combined cell-type summaries into a heatmap-ready matrix.
@@ -231,6 +232,12 @@ def pivot_for_heatmap(
         Manual display order for grouping related cell types as heatmap
         rows. Used as a secondary sort key within each level. When None
         (default), rows fall back to alphabetical order within level.
+    tissue_order : list[str] or None
+        Manual display order for grouping sample columns by tissue (e.g.
+        ["MedLN", "MesLN", "Spleen"]). Requires a "tissue" column in df.
+        Samples are sorted by tissue group first, then alphabetically
+        within each group. When None (default), columns fall back to
+        alphabetical order (no tissue grouping).
     """
     required = {"sample", "level", "cell_type", "pct_total"}
     missing = required - set(df.columns)
@@ -267,6 +274,18 @@ def pivot_for_heatmap(
         )
     ]
 
+    if tissue_order and "tissue" in df.columns:
+        sample_tissue = df.drop_duplicates("sample").set_index("sample")["tissue"]
+        matrix = matrix[
+            sorted(
+                matrix.columns,
+                key=lambda s: (
+                    _manual_order_position(sample_tissue.get(s), tissue_order),
+                    s,
+                ),
+            )
+        ]
+
     return matrix
 
 
@@ -278,6 +297,7 @@ def pivot_for_tissue_heatmap(
     immune_only=False,
     structural_cell_types=None,
     celltype_order=None,
+    tissue_order=None,
 ):
     """
     Pivot tissue-aggregated summaries into a heatmap-ready matrix.
@@ -427,7 +447,7 @@ def plot_celltype_heatmap(
     ax.tick_params(length=0)
 
     divider = make_axes_locatable(ax)
-    cax = divider.append_axes("top", size="3%", pad=0.3)
+    cax = divider.append_axes("top", size=0.15, pad=0.3)
     cbar = fig.colorbar(im, cax=cax, orientation="horizontal")
     cax.xaxis.set_ticks_position("bottom")
     cax.xaxis.set_label_position("bottom")
@@ -445,14 +465,20 @@ def plot_celltype_heatmap(
     vmin_actual, vmax_actual = im.get_clim()
     if scale == "linear":
         ticks = np.arange(tick_step, vmax_actual + tick_step / 2, tick_step)
-        # Whole numbers when the range is wide, one decimal when small
         if vmax_actual >= 10:
             labels = [f"{t:.0f}" for t in ticks]
         else:
             labels = [f"{t:.1f}" for t in ticks]
+    else:
+        ticks = np.linspace(vmin_actual, vmax_actual, 3)
+        labels = [f"{t:.1f}" for t in ticks]
 
     cbar.set_ticks(ticks)
     cbar.set_ticklabels(labels)
+    cax.tick_params(axis="x", length=0)
+    for t in ticks:
+        cax.axvline(t, ymin=0.0, ymax=0.25, color="white", linewidth=0.8)
+        cax.axvline(t, ymin=0.75, ymax=1.0, color="white", linewidth=0.8)
 
     if title is not None:
         ax.set_title(title, fontsize=12, pad=20)
@@ -504,7 +530,12 @@ def plot_celltype_clustermap(
 
     if scale == "linear":
         vmin = 0
-        vmax = float(np.nanmax(data.values)) if vmax is None else vmax
+        if vmax is None:
+            raw_max = float(np.nanmax(data.values))
+            tick_step = _nice_step(raw_max)
+            vmax = _round_up_to_step(raw_max, tick_step)
+        else:
+            tick_step = _nice_step(vmax)
     else:
         vmin = np.nanmin(data.values)
         vmax = np.nanmax(data.values)
@@ -534,8 +565,7 @@ def plot_celltype_clustermap(
         cbar.set_ylabel(colorbar_legend, fontsize=10, rotation=90, labelpad=10)
 
     if scale == "linear":
-        mid = vmax / 2
-        ticks = [0, mid, vmax]
+        ticks = np.arange(tick_step, vmax + tick_step / 2, tick_step)
         if vmax >= 10:
             labels = [f"{t:.0f}" for t in ticks]
         else:
@@ -546,9 +576,14 @@ def plot_celltype_clustermap(
 
     cbar.set_yticks(ticks)
     cbar.set_yticklabels(labels)
+    cbar.tick_params(axis="y", length=0)
+    for t in ticks:
+        if np.isclose(t, vmax):
+            continue
+        cbar.axhline(t, xmin=0.0, xmax=0.25, color="white", linewidth=0.8)
+        cbar.axhline(t, xmin=0.75, xmax=1.0, color="white", linewidth=0.8)
 
     plt.show()
-
 
 # Numeric summary
 
