@@ -39,27 +39,21 @@ def truncate_cmap(cmap_name, minval=0.15, maxval=1.0, n=256):
         base(np.linspace(minval, maxval, n)),
     )
 
-def _nice_step(value):
+def _step(value):
     """
-    Pick an evenly spaced tick step appropriate for a 0-to-value colour
-    scale, so ticks land on clean numbers (5s, 10s, 20s, ...) rather
-    than arbitrary fractions.
+    Pick an evenly spaced tick step for a 0-to-value colour scale.
+    Defaults to 10, which suits the 0-100 percentage scales used
+    throughout this project, and falls back to a smaller step only
+    when the range itself is small.
     """
     if value <= 0:
         return 1.0
-    if value <= 20:
+    if value <= 10:
+        return 2.0
+    elif value <= 20:
         return 5.0
-    elif value <= 100:
-        return 20.0
-    elif value <= 500:
-        return 100.0
     else:
-        return float(10 ** np.floor(np.log10(value)))
-
-
-def _round_up_to_step(value, step):
-    """Round value up to the nearest multiple of step."""
-    return float(np.ceil(value / step) * step)
+        return 10.0
 
 # Data loading
 
@@ -415,17 +409,10 @@ def plot_celltype_heatmap(
     if scale == "linear":
         vmin = 0
         if vmax is None:
-            raw_max = float(np.nanmax(matrix.values))
-            tick_step = _nice_step(raw_max)
-            vmax = _round_up_to_step(raw_max, tick_step)
-        else:
-            tick_step = _nice_step(vmax)
+            vmax = float(np.nanmax(matrix.values))
+        tick_step = _step(vmax)
     elif scale == "log":
         vmin = np.nanmin(matrix.values)
-        vmax = np.nanmax(matrix.values)
-    else:
-        vmin = np.nanmin(matrix.values)
-        vmax = np.nanmax(matrix.values)
 
     im = ax.imshow(
         matrix.values,
@@ -464,7 +451,8 @@ def plot_celltype_heatmap(
 
     vmin_actual, vmax_actual = im.get_clim()
     if scale == "linear":
-        ticks = np.arange(tick_step, vmax_actual + tick_step / 2, tick_step)
+        ticks = np.arange(tick_step, vmax_actual + 1e-9, tick_step)
+        ticks = ticks[ticks <= vmax_actual]
         if vmax_actual >= 10:
             labels = [f"{t:.0f}" for t in ticks]
         else:
@@ -531,11 +519,8 @@ def plot_celltype_clustermap(
     if scale == "linear":
         vmin = 0
         if vmax is None:
-            raw_max = float(np.nanmax(data.values))
-            tick_step = _nice_step(raw_max)
-            vmax = _round_up_to_step(raw_max, tick_step)
-        else:
-            tick_step = _nice_step(vmax)
+            vmax = float(np.nanmax(data.values))
+        tick_step = _step(vmax)
     else:
         vmin = np.nanmin(data.values)
         vmax = np.nanmax(data.values)
@@ -583,7 +568,9 @@ def plot_celltype_clustermap(
         cbar.set_ylabel(colorbar_legend, fontsize=10, rotation=90, labelpad=10)
 
     if scale == "linear":
-        ticks = np.arange(tick_step, vmax + tick_step / 2, tick_step)
+        ticks = np.arange(tick_step, vmax + 1e-9, tick_step)
+        ticks = ticks[ticks <= vmax]
+
         if vmax >= 10:
             labels = [f"{t:.0f}" for t in ticks]
         else:
