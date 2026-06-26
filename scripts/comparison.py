@@ -657,6 +657,8 @@ def plot_celltype_stacked_barplot(
     structural_cell_types=None,
     lineage_subsets=None,
     drop_unclassified=False,
+    ylabel=None,
+    tissue_order=None,
 ):
     """
     Stacked barplot of cell type composition.
@@ -701,13 +703,28 @@ def plot_celltype_stacked_barplot(
         percentages to sum to 100 within each x-group. Ignored if
         immune_only or lineage_subset is set, since both already exclude
         unclassified as part of their own rescaling. Default False.
+    ylabel : str or None
+        If provided, overrides the automatically generated y-axis label
+        (including the immune_only/lineage_subset/drop_unclassified
+        defaults). Default None keeps the automatic label.
+    tissue_order : list[str] or None
+        Manual display order for the x-axis groups, grouped by tissue
+        (e.g. ["MedLN", "MesLN", "Spleen"]). If x="sample", requires a
+        "tissue" column in df; samples are sorted by tissue group first,
+        then alphabetically within each group. If x="tissue", the tissue
+        labels themselves are sorted directly by this order. When None
+        (default), falls back to alphabetical order. Same convention as
+        tissue_order in pivot_for_heatmap.
     """
     required = {"level", "cell_type", "pct_total", x}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
 
+    manual_ylabel = ylabel
+
     df = df.copy()
+
     df = df[~df["cell_type"].str.endswith("_unassigned")]
     df = df[df["cell_type"] != "B_plasmablast"]
 
@@ -756,6 +773,23 @@ def plot_celltype_stacked_barplot(
     if ylim is not None and (matrix.sum(axis=1) > ylim[1] + 0.5).any():
         print("Warning: some stacked bars exceed the specified ylim upper bound.")
 
+    if tissue_order:
+        if x == "tissue":
+            matrix = matrix.loc[
+                sorted(matrix.index, key=lambda t: _manual_order_position(t, tissue_order))
+            ]
+        elif x == "sample" and "tissue" in df.columns:
+            sample_tissue = df.drop_duplicates("sample").set_index("sample")["tissue"]
+            matrix = matrix.loc[
+                sorted(
+                    matrix.index,
+                    key=lambda s: (
+                        _manual_order_position(sample_tissue.get(s), tissue_order),
+                        s,
+                    ),
+                )
+            ]
+
     order = matrix.mean(axis=0).sort_values(ascending=False).index
     matrix = matrix[order]
 
@@ -786,6 +820,9 @@ def plot_celltype_stacked_barplot(
 
     ax.set_xticks(range(len(matrix.index)))
     ax.set_xticklabels(matrix.index, rotation=45, ha="right")
+
+    if manual_ylabel is not None:
+        ylabel = manual_ylabel
     ax.set_ylabel(ylabel)
 
     if ylim is not None:
@@ -813,4 +850,199 @@ def plot_celltype_stacked_barplot(
 
     return palette
 
-#TODO add violin plot function with dot colors by donor
+def plot_celltype_facet_dotplot(
+    df,
+    level="type",
+    x="tissue",
+    tissue_order=None,
+    donor_colors=None,
+    summary="bar",
+    immune_only=False,
+    structural_cell_types=None,
+    drop_unclassified=False,
+    celltype_order=None,
+    ylim=(0, 100),
+    ylabel=None,
+    ncols=3,
+    figsize=None,
+    jitter=0.08,
+    point_size=30,
+):
+    """
+    Facet grid with one subplot per cell type, showing individual sample
+    points grouped by tissue, colored by donor.
+
+    Unlike plot_celltype_stacked_barplot, nothing is averaged across ROIs
+    or donors. Every sample is its own point, so a donor with multiple
+    ROIs in the same tissue shows multiple points there.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Must contain ['level', 'cell_type', 'pct_total', 'donor', x].
+    level : str
+        Single hierarchy level to facet over (e.g. "type").
+    x : str
+        Column to use as the x-axis within each subplot. Default "tissue".
+    tissue_order : list[str] or None
+        Manual display order for the x-axis groups. Falls back to
+        alphabetical order when None.
+    donor_colors : dict[str, color]
+        Mapping of donor id to a matplotlib color. Required.
+    summary : "bar", "box", or None
+        What to draw alongside the points for each x-group. "bar" draws
+        a line at the mean. "box" draws a standard boxplot. None draws
+        points only.
+    immune_only : bool
+        If True, drop structural_cell_types and unclassified, then
+        rescale remaining percentages to sum to 100 within each sample.
+        Requires structural_cell_types.
+    structural_cell_types : list[str] or None
+        Structural cell types to drop when immune_only is True.
+    drop_unclassified : bool
+        If True, drop 'unclassified' and rescale to 100 within each
+        sample. Ignored if immune_only is True.
+    celltype_order : list[str] or None
+        Manual order for the facets. Falls back to alphabetical order
+        when None.
+    ylim : tuple or None
+        Shared y-axis limit across all facets.
+    ylabel : str or None
+        Shared y-axis label. Defaults to "Percentage of cells", or
+        "Percentage of immune cells (CD45+)" when immune_only is True.
+    ncols : int
+        Number of facet columns. Rows are computed automatically.
+    figsize : tuple or None
+        Auto-computed from the number of facets when None.
+    jitter : float
+        Horizontal jitter applied to points within each x-group, in axis
+        units, so overlapping points from the same donor/tissue stay
+        visible. Set to 0 to disable.
+    point_size : float
+        Marker size for the individual points.
+    """
+    required = {"level", "cell_type", "pct_total", "donor", x}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    if donor_colors is None:
+        raise ValueError("donor_colors is required (mapping of donor id to color).")
+    if summary not in ("bar", "box", None):
+        raise ValueError('summary must be "bar", "box", or None')
+
+    df = df.copy()
+    df = df[df["level"] == level]
+    df = df[~df["cell_type"].str.endswith("_unassigned")]
+
+    ylabel_default = "Percentage of cells"
+
+    if immune_only:
+        if structural_cell_types is None:
+            raise ValueError(
+                "immune_only=True requires structural_cell_types (the list "
+                "of structural cell types to drop) to be provided."
+            )
+        df = df[~df["cell_type"].isin(structural_cell_types)]
+        df = df[df["cell_type"] != "unclassified"]
+        ylabel_default = "Percentage of immune cells (CD45+)"
+        df = _rescale_to_100(df, group_cols=["sample"])
+    elif drop_unclassified:
+        df = df[df["cell_type"] != "unclassified"]
+        ylabel_default = "Percentage of cells"
+        df = _rescale_to_100(df, group_cols=["sample"])
+
+    if ylabel is None:
+        ylabel = ylabel_default
+
+    cell_types = sorted(
+        df["cell_type"].unique(),
+        key=lambda ct: (_manual_order_position(ct, celltype_order), ct),
+    )
+    x_groups = sorted(
+        df[x].unique(),
+        key=lambda v: (_manual_order_position(v, tissue_order), v),
+    )
+    x_positions = {val: i for i, val in enumerate(x_groups)}
+
+    n_facets = len(cell_types)
+    nrows = int(np.ceil(n_facets / ncols))
+    if figsize is None:
+        figsize = (ncols * 3.2, nrows * 3.0)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
+    axes_flat = axes.flatten()
+
+    rng = np.random.default_rng(0)  # fixed seed so jitter is reproducible across reruns
+
+    for ax, ct in zip(axes_flat, cell_types):
+        sub = df[df["cell_type"] == ct]
+
+        for val in x_groups:
+            group = sub[sub[x] == val]
+            if group.empty:
+                continue
+            xpos = x_positions[val]
+
+            if summary == "bar":
+                mean_val = group["pct_total"].mean()
+                ax.plot(
+                    [xpos - 0.3, xpos + 0.3],
+                    [mean_val, mean_val],
+                    color="black",
+                    linewidth=1.5,
+                    linestyle="--",
+                    zorder=2,
+                )
+            elif summary == "box":
+                ax.boxplot(
+                    group["pct_total"].values,
+                    positions=[xpos],
+                    widths=0.5,
+                    showfliers=False,
+                    zorder=2,
+                )
+
+            x_jitter = rng.uniform(-jitter, jitter, size=len(group)) if jitter else 0
+            point_colors = [donor_colors.get(d, "gray") for d in group["donor"]]
+            ax.scatter(
+                xpos + x_jitter,
+                group["pct_total"].values,
+                c=point_colors,
+                s=point_size,
+                edgecolor="white",
+                linewidth=0.5,
+                zorder=3,
+            )
+
+        ax.set_xticks(range(len(x_groups)))
+        ax.set_xticklabels(x_groups, rotation=45, ha="right")
+        ax.set_title(_display_label(ct), fontsize=10)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.grid(False)
+
+    for ax in axes_flat[n_facets:]:
+        ax.axis("off")
+
+    for row in range(nrows):
+        axes[row, 0].set_ylabel(ylabel)
+
+    handles = [
+        plt.Line2D(
+            [0], [0], marker="o", color="white", markerfacecolor=color,
+            markeredgecolor="white", markersize=8, label=donor,
+        )
+        for donor, color in donor_colors.items()
+    ]
+    fig.legend(
+        handles=handles,
+        loc="upper left",
+        bbox_to_anchor=(1.0, 1.0),
+        frameon=False,
+        title="Donor",
+    )
+
+    plt.tight_layout()
+    plt.show()
