@@ -3,11 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-
 from sklearn.cluster import DBSCAN
-from pathlib import Path
-import os
-
 
 def detect_follicles(
         adata,
@@ -98,6 +94,27 @@ def plot_follicles(adata, sample_name, out_dir):
 
     plt.show()
 
-import hdbscan
-import numpy as np
+def normalize_follicle_counts(df, per_n_cells=1000):
+    """
+    Add a column with follicle counts normalized to a fixed number of cells.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Must contain 'n_follicles' and 'total_cells' columns.
+    per_n_cells : int
+        The cell count to normalize to (default 1000).
+
+    Returns
+    -------
+    df : pandas.DataFrame
+        Same dataframe with a new column 'follicles_per_1000cells'.
+    """
+    df = df.copy()
+    df["follicles_per_1000cells"] = (
+        df["n_follicles"] / df["total_cells"] * per_n_cells
+    ).round(2)
+    return df
+
+
 
