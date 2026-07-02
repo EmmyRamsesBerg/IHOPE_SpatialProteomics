@@ -82,7 +82,8 @@ def _zscore(df, columns):
         if col in df.columns:
             marker_name = col.replace(': Mean', '')
             new_col = f"z_{marker_name}"
-            df[new_col] = zscore(df[col])
+            log_values = np.log2(df[col] + 1)
+            df[new_col] = zscore(log_values)
             new_cols.append(new_col)
     return df, new_cols
 
