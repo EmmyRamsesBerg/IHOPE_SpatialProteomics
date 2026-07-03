@@ -411,20 +411,17 @@ def add_TfH_like_cells(
     adata: AnnData,
     follicle_key: str = "B_follicle",
     output_key: str = "subtype_TfH_like",
-    output_spatial_key: str = "subtype_TfH_like_spatial",
     plot: bool = False,
     size: float = 1.0,
     sample_name: str = "",
 ):
     """
-    Define TfH-like cells from markers, then add a spatially refined subset.
+    Define TfH-like cells using spatial follicle context and markers.
 
-    subtype_TfH_like (marker call) =
+    TfH-like =
         CD4 memory T cells
+        AND located in B-cell follicle
         AND PD-1+ OR ICOS+
-
-    subtype_TfH_like_spatial =
-        marker call AND located in B-cell follicle
     """
 
     required_keys = [
@@ -438,32 +435,23 @@ def add_TfH_like_cells(
         if key not in adata.obs:
             raise ValueError(f"{key} not found in adata.obs")
 
-    # Marker-only TfH-like call (CD4 memory, PD-1 or ICOS), no spatial requirement
+    # CD4 memory T cells inside a follicle that are PD-1+ or ICOS+
     adata.obs[output_key] = (
         adata.obs["intermediate_CD4_T"]
+        & adata.obs[follicle_key]
         & ~adata.obs["intermediate_T_naive"]
         & (adata.obs["PD-1_pos"] | adata.obs["ICOS_pos"])
     )
 
-    # Spatially refined TfH-like, marker call AND inside follicle
-    adata.obs[output_spatial_key] = (
-        adata.obs[output_key]
-        & adata.obs[follicle_key]
-    )
-
-    # Remove the marker-based TfH-like cells from the T unassigned pool
+    # Remove TfH-like cells from the T unassigned pool
     if "subtype_T_unassigned" in adata.obs:
         adata.obs["subtype_T_unassigned"] = (
             adata.obs["subtype_T_unassigned"] & ~adata.obs[output_key]
         )
 
     print(
-        f"TfH-like cells (marker call): {adata.obs[output_key].sum()} "
+        f"TfH-like cells: {adata.obs[output_key].sum()} "
         f"({100 * adata.obs[output_key].mean():.2f}% of all cells)"
-    )
-    print(
-        f"TfH-like cells (in follicle): {adata.obs[output_spatial_key].sum()} "
-        f"({100 * adata.obs[output_spatial_key].mean():.2f}% of all cells)"
     )
 
     if plot:
@@ -495,8 +483,8 @@ def add_TfH_like_cells(
             label="B-cell follicles",
         )
 
-        # TfH-like cells (spatially refined, inside follicle)
-        t = adata.obs[output_spatial_key]
+        # TfH-like cells
+        t = adata.obs[output_key]
         plt.scatter(
             x[t],
             y[t],
@@ -518,51 +506,60 @@ def add_TfH_like_cells(
 def add_spatial_B_context(
     adata: AnnData,
     follicle_key: str = "B_follicle",
-    input_gc_key: str = "subtype_B_GC",
-    input_plasmablast_key: str = "subtype_B_Plasmablast",
-    output_gc_key: str = "subtype_B_GC_spatial",
-    output_pb_key: str = "subtype_B_Plasmablast_spatial",
+    gc_key: str = "subtype_B_GC",
+    plasmablast_key: str = "subtype_B_Plasmablast",
+    type_b_key: str = "type_B",
+    recompute_unassigned: bool = True,
     plot: bool = False,
     size: float = 1.0,
     sample_name: str = "",
 ):
     """
-    Add spatially refined B-cell subsets WITHOUT modifying existing annotations.
+    Refine B-cell subsets by follicle location, OVERWRITING the marker calls in place.
 
-    subtype_B_GC_spatial:
+    subtype_B_GC becomes
         marker-based GC call AND inside follicle
-
-    subtype_B_Plasmablast_spatial:
+    subtype_B_Plasmablast becomes
         marker-based plasmablast call AND outside follicle
+
+    Because inside and outside the follicle are mutually exclusive, GC and
+    Plasmablast are mutually exclusive after this step. Cells that were marker
+    positive but on the wrong side of the follicle boundary lose their subtype
+    label here. When recompute_unassigned is True, subtype_B_unassigned is
+    recomputed from the final subtype_B_ columns so those cells are counted as
+    unassigned rather than falling through the accounting.
     """
 
     required_keys = [
         follicle_key,
-        input_gc_key,
-        input_plasmablast_key,
+        gc_key,
+        plasmablast_key,
     ]
 
     for key in required_keys:
         if key not in adata.obs:
             raise ValueError(f"{key} not found in adata.obs")
 
-    # GC B cells inside follicles
-    gc_marker_call = adata.obs[input_gc_key]
-    plasmablast_marker_call = adata.obs[input_plasmablast_key]
+    in_follicle = adata.obs[follicle_key]
 
-    adata.obs[output_gc_key] = (
-        gc_marker_call
-        & adata.obs[follicle_key]
-    )
-    # Plasmablast B cells outside follicles
-    adata.obs[output_pb_key] = (
-            plasmablast_marker_call
-            & ~adata.obs[follicle_key]
-    )
+    # GC B cells kept only inside follicles, Plasmablast only outside
+    adata.obs[gc_key] = adata.obs[gc_key] & in_follicle
+    adata.obs[plasmablast_key] = adata.obs[plasmablast_key] & ~in_follicle
+
+    # Recompute the B unassigned pool so marker-positive, wrong-location cells
+    # are accounted for after the overwrite
+    if recompute_unassigned and type_b_key in adata.obs:
+        b_subtypes = [
+            c for c in adata.obs.columns
+            if c.startswith("subtype_B_") and c != "subtype_B_unassigned"
+        ]
+        adata.obs["subtype_B_unassigned"] = (
+            adata.obs[type_b_key] & ~adata.obs[b_subtypes].any(axis=1)
+        )
 
     # Summary
-    print("Spatial B-cell annotations added:")
-    for col in [output_gc_key, output_pb_key]:
+    print("Spatial B-cell annotations applied (overwrite in place):")
+    for col in [gc_key, plasmablast_key]:
         count = int(adata.obs[col].sum())
         pct = 100 * adata.obs[col].mean()
         print(f"  {col}: {count} ({pct:.2f}%)")
@@ -581,10 +578,10 @@ def add_spatial_B_context(
         f = adata.obs[follicle_key]
         plt.scatter(x[f], y[f], s=size * 2, c="orange", alpha=0.4, label="Follicle")
 
-        gc = adata.obs[output_gc_key]
+        gc = adata.obs[gc_key]
         plt.scatter(x[gc], y[gc], s=size * 4, c="blue", label="GC (follicular)")
 
-        pb = adata.obs[output_pb_key]
+        pb = adata.obs[plasmablast_key]
         plt.scatter(x[pb], y[pb], s=size * 4, c="red", label="Plasmablast (extrafollicular)")
 
         plt.gca().invert_yaxis()

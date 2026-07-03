@@ -850,7 +850,7 @@ def plot_celltype_stacked_barplot(
 
     return palette
 
-def plot_celltype_facet_dotplot(
+def plot_celltype_stripplot(
     df,
     level="type",
     x="tissue",
@@ -861,7 +861,9 @@ def plot_celltype_facet_dotplot(
     structural_cell_types=None,
     drop_unclassified=False,
     celltype_order=None,
-    ylim=(0, 100),
+    cell_types=None,
+    denominator_cell_type=None,
+    ylim=None,
     ylabel=None,
     ncols=3,
     figsize=None,
@@ -879,9 +881,14 @@ def plot_celltype_facet_dotplot(
     Parameters
     ----------
     df : DataFrame
-        Must contain ['level', 'cell_type', 'pct_total', 'donor', x].
+        Full combined summary dataframe, all levels and all samples.
+        Must contain ['level', 'cell_type', 'pct_total', 'sample', 'donor', x].
+        Pass the unfiltered dataframe even when using cell_types to
+        restrict the facets, since denominator_cell_type (when set) needs
+        to look up values at the intermediate level that would otherwise
+        be filtered out.
     level : str
-        Single hierarchy level to facet over (e.g. "type").
+        Single hierarchy level to facet over (e.g. "type", "subtype").
     x : str
         Column to use as the x-axis within each subplot. Default "tissue".
     tissue_order : list[str] or None
@@ -890,13 +897,12 @@ def plot_celltype_facet_dotplot(
     donor_colors : dict[str, color]
         Mapping of donor id to a matplotlib color. Required.
     summary : "bar", "box", or None
-        What to draw alongside the points for each x-group. "bar" draws
-        a line at the mean. "box" draws a standard boxplot. None draws
-        points only.
+        What to draw alongside the points for each x-group.
     immune_only : bool
         If True, drop structural_cell_types and unclassified, then
         rescale remaining percentages to sum to 100 within each sample.
-        Requires structural_cell_types.
+        Requires structural_cell_types. Mutually exclusive with
+        denominator_cell_type, since both define what pct_total means.
     structural_cell_types : list[str] or None
         Structural cell types to drop when immune_only is True.
     drop_unclassified : bool
@@ -905,23 +911,38 @@ def plot_celltype_facet_dotplot(
     celltype_order : list[str] or None
         Manual order for the facets. Falls back to alphabetical order
         when None.
+    cell_types : list[str] or None
+        Restrict facets to this list of cell_type names within the given
+        level. When None (default), all cell types found at that level
+        are faceted, same as before this parameter existed.
+    denominator_cell_type : str or None
+        Name of a cell_type at the intermediate level (e.g. "CD4_T") to
+        use as the denominator. When set, each facet's pct_total is
+        divided by that sample's percentage for denominator_cell_type
+        and multiplied by 100, so values become percentage of that
+        lineage rather than percentage of total cells. Looked up from
+        the full df passed in, before any level or cell_types filtering,
+        so pass the unfiltered dataframe when using this. Mutually
+        exclusive with immune_only and drop_unclassified.
     ylim : tuple or None
-        Shared y-axis limit across all facets.
+        Shared y-axis limit across all facets. Default None, meaning
+        each facet's y-axis is scaled by matplotlib to fit its own data.
     ylabel : str or None
-        Shared y-axis label. Defaults to "Percentage of cells", or
-        "Percentage of immune cells (CD45+)" when immune_only is True.
+        Shared y-axis label. Overrides the automatic label, including
+        the denominator_cell_type default, when provided.
     ncols : int
-        Number of facet columns. Rows are computed automatically.
+        Number of facet columns requested. Automatically capped to the
+        number of facets actually present, so a single-facet plot uses
+        a single column rather than reserving empty space.
     figsize : tuple or None
         Auto-computed from the number of facets when None.
     jitter : float
         Horizontal jitter applied to points within each x-group, in axis
-        units, so overlapping points from the same donor/tissue stay
-        visible. Set to 0 to disable.
+        units. Set to 0 to disable.
     point_size : float
         Marker size for the individual points.
     """
-    required = {"level", "cell_type", "pct_total", "donor", x}
+    required = {"level", "cell_type", "pct_total", "sample", "donor", x}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
@@ -929,12 +950,38 @@ def plot_celltype_facet_dotplot(
         raise ValueError("donor_colors is required (mapping of donor id to color).")
     if summary not in ("bar", "box", None):
         raise ValueError('summary must be "bar", "box", or None')
+    if immune_only and denominator_cell_type is not None:
+        raise ValueError(
+            "immune_only and denominator_cell_type are mutually exclusive."
+        )
+    if drop_unclassified and denominator_cell_type is not None:
+        raise ValueError(
+            "drop_unclassified and denominator_cell_type are mutually exclusive."
+        )
 
-    df = df.copy()
-    df = df[df["level"] == level]
+    df_full = df.copy()
+
+    denom_lookup = None
+    ylabel_default = "Percentage of cells"
+
+    if denominator_cell_type is not None:
+        denom_rows = df_full[
+            (df_full["level"] == "intermediate")
+            & (df_full["cell_type"] == denominator_cell_type)
+        ]
+        if denom_rows.empty:
+            raise ValueError(
+                f"denominator_cell_type '{denominator_cell_type}' not found "
+                f"at level 'intermediate' in df."
+            )
+        denom_lookup = denom_rows.set_index("sample")["pct_total"]
+        ylabel_default = f"Percentage of {denominator_cell_type} cells"
+
+    df = df_full[df_full["level"] == level].copy()
     df = df[~df["cell_type"].str.endswith("_unassigned")]
 
-    ylabel_default = "Percentage of cells"
+    if cell_types is not None:
+        df = df[df["cell_type"].isin(cell_types)]
 
     if immune_only:
         if structural_cell_types is None:
@@ -950,11 +997,16 @@ def plot_celltype_facet_dotplot(
         df = df[df["cell_type"] != "unclassified"]
         ylabel_default = "Percentage of cells"
         df = _rescale_to_100(df, group_cols=["sample"])
+    elif denominator_cell_type is not None:
+        df["pct_total"] = df.apply(
+            lambda row: row["pct_total"] / denom_lookup.get(row["sample"], np.nan) * 100,
+            axis=1,
+        )
 
     if ylabel is None:
         ylabel = ylabel_default
 
-    cell_types = sorted(
+    cell_type_order = sorted(
         df["cell_type"].unique(),
         key=lambda ct: (_manual_order_position(ct, celltype_order), ct),
     )
@@ -964,7 +1016,8 @@ def plot_celltype_facet_dotplot(
     )
     x_positions = {val: i for i, val in enumerate(x_groups)}
 
-    n_facets = len(cell_types)
+    n_facets = len(cell_type_order)
+    ncols = min(ncols, n_facets)
     nrows = int(np.ceil(n_facets / ncols))
     if figsize is None:
         figsize = (ncols * 3.2, nrows * 3.0)
@@ -974,7 +1027,7 @@ def plot_celltype_facet_dotplot(
 
     rng = np.random.default_rng(0)  # fixed seed so jitter is reproducible across reruns
 
-    for ax, ct in zip(axes_flat, cell_types):
+    for ax, ct in zip(axes_flat, cell_type_order):
         sub = df[df["cell_type"] == ct]
 
         for val in x_groups:
