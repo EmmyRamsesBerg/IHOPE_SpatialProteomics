@@ -360,6 +360,104 @@ def pivot_for_tissue_heatmap(
     return matrix
 
 
+# Parent-relative normalisation
+
+def normalise_to_parent(matrix, parent_of, root_children):
+    """
+    Express each row as a percentage of its parent population.
+
+    Every value in `matrix` is on a common base (percentage of all cells),
+    so a child divided by its parent gives the child as a percentage of
+    that parent. Denominators are read from the original matrix, so
+    overwriting a row never corrupts a denominator used by another row.
+
+    Parameters
+    ----------
+    matrix : DataFrame
+        cell_type x sample (or cell_type x tissue) matrix of pct_total.
+        Must contain the parent rows named in parent_of and the rows in
+        root_children.
+    parent_of : dict[str, str]
+        Mapping of child cell_type to the parent cell_type whose own total
+        is the denominator. Biology lives in the notebook, not here.
+    root_children : list[str]
+        Top-level cell types (e.g. the immune types) that have no single
+        parent row. Each is divided by the per-column sum over the
+        root_children that are present, which is their combined parent
+        population.
+
+    Returns
+    -------
+    DataFrame with only the displayed rows (root_children plus the keys of
+    parent_of), in the same row order as the input matrix. Rows not named
+    in either (structural cells, *_unassigned, unclassified) are dropped.
+    Division by an absent parent yields NaN, left for the caller to handle.
+    """
+    out = matrix.copy().astype(float)
+
+    present_roots = [r for r in root_children if r in matrix.index]
+    root_denom = matrix.loc[present_roots].sum(axis=0).replace(0, np.nan)
+    for ct in present_roots:
+        out.loc[ct] = matrix.loc[ct] / root_denom * 100
+
+    for child, parent in parent_of.items():
+        if child in matrix.index and parent in matrix.index:
+            denom = matrix.loc[parent].replace(0, np.nan)
+            out.loc[child] = matrix.loc[child] / denom * 100
+
+    displayed = set(root_children) | set(parent_of)
+    keep = [r for r in matrix.index if r in displayed]
+    return out.loc[keep]
+
+
+def parent_ratio_labels(
+    matrix,
+    parent_of,
+    root_children,
+    display_names=None,
+    root_label="immune cells",
+):
+    """
+    Relabel rows as 'child / parent' for parent-relative heatmaps.
+
+    Each row name becomes the child display name, a slash, and the display
+    name of the population it was divided by. Root children use root_label
+    as the denominator name. Only the row labels change, the values are
+    untouched, and the numeric matrix passed in is left alone.
+
+    Parameters
+    ----------
+    matrix : DataFrame
+        Output of normalise_to_parent, indexed by cell_type.
+    parent_of : dict[str, str]
+        Same child to parent mapping used for the normalisation.
+    root_children : list[str]
+        Top-level cell types whose denominator has no single row.
+    display_names : dict[str, str] or None
+        Optional cell_type to display-name map. Cell types not listed fall
+        back to underscores replaced by spaces.
+    root_label : str
+        Display name for the combined root denominator (e.g. immune cells).
+    """
+    def disp(ct):
+        if display_names and ct in display_names:
+            return display_names[ct]
+        return ct.replace("_", " ")
+
+    new_index = []
+    for ct in matrix.index:
+        if ct in root_children:
+            new_index.append(f"{disp(ct)} / {root_label}")
+        elif ct in parent_of:
+            new_index.append(f"{disp(ct)} / {disp(parent_of[ct])}")
+        else:
+            new_index.append(disp(ct))
+
+    out = matrix.copy()
+    out.index = new_index
+    return out
+
+
 # Heatmap
 
 def plot_celltype_heatmap(
