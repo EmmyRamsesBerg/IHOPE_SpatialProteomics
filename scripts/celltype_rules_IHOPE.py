@@ -542,6 +542,19 @@ def add_spatial_B_context(
 
     in_follicle = adata.obs[follicle_key]
 
+    # Marker-level calls before the overwrite, used to report how many cells the
+    # location filter removes from each subtype
+    gc_marker = adata.obs[gc_key]
+    pb_marker = adata.obs[plasmablast_key]
+
+    gc_marker_n = int(gc_marker.sum())
+    pb_marker_n = int(pb_marker.sum())
+
+    # GC removed = marker positive but outside follicle
+    # Plasmablast removed = marker positive but inside follicle
+    gc_removed_n = int((gc_marker & ~in_follicle).sum())
+    pb_removed_n = int((pb_marker & in_follicle).sum())
+
     # GC B cells kept only inside follicles, Plasmablast only outside
     adata.obs[gc_key] = adata.obs[gc_key] & in_follicle
     adata.obs[plasmablast_key] = adata.obs[plasmablast_key] & ~in_follicle
@@ -558,6 +571,25 @@ def add_spatial_B_context(
         )
 
     # Summary
+
+    # Summary of the location filter, reporting removed cells as a fraction of
+    # each subtype's marker-level count
+    def _removed_pct(removed, marker_total):
+        return 100 * removed / marker_total if marker_total > 0 else 0.0
+
+    gc_kept_n = int(adata.obs[gc_key].sum())
+    pb_kept_n = int(adata.obs[plasmablast_key].sum())
+
+    print("Spatial B-cell restriction applied (overwrite in place):")
+    print(
+        f"  {gc_key}: {gc_marker_n} marker, {gc_kept_n} kept, "
+        f"{gc_removed_n} removed ({_removed_pct(gc_removed_n, gc_marker_n):.1f}% of subtype)"
+    )
+    print(
+        f"  {plasmablast_key}: {pb_marker_n} marker, {pb_kept_n} kept, "
+        f"{pb_removed_n} removed ({_removed_pct(pb_removed_n, pb_marker_n):.1f}% of subtype)"
+    )
+
     print("Spatial B-cell annotations applied (overwrite in place):")
     for col in [gc_key, plasmablast_key]:
         count = int(adata.obs[col].sum())

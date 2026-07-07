@@ -197,3 +197,56 @@ def plot_domain_mask(adata, domains):
     plt.axis("off")
     plt.title(f"Domain {domains} (ALL cells)")
     plt.show()
+
+def plot_B_subtypes_over_follicle(
+    adata: AnnData,
+    subtype_cols: dict,
+    follicle_key: str = "B_follicle",
+    sample_name: str = "",
+    title_suffix: str = "",
+    size: float = 1.0,
+):
+    """
+    Overlay B-cell subtypes on the follicle domain.
+
+    subtype_cols maps a display label to an obs column name, for example
+    {"Naive": "subtype_B_naive", "GC": "subtype_B_GC",
+     "Plasmablast": "subtype_B_Plasmablast"}.
+
+    Draws all cells faint grey, the follicle cells as a soft layer, then each
+    subtype on top. No counts or percentages are drawn on the image.
+    """
+    x = adata.obsm["spatial"][:, 0]
+    y = adata.obsm["spatial"][:, 1]
+
+    colors = {
+        "Naive": "mediumpurple",
+        "GC": "royalblue",
+        "Plasmablast": "crimson",
+    }
+    default_cycle = ["seagreen", "darkorange", "teal", "brown"]
+
+    plt.figure(figsize=(6, 6))
+
+    # All cells
+    plt.scatter(x, y, s=size, c="lightgrey", alpha=0.3)
+
+    # Follicle domain
+    f = adata.obs[follicle_key]
+    plt.scatter(x[f], y[f], s=size * 2, c="orange", alpha=0.35, label="Follicle")
+
+    # Subtypes on top
+    for i, (label, col) in enumerate(subtype_cols.items()):
+        m = adata.obs[col].values
+        color = colors.get(label, default_cycle[i % len(default_cycle)])
+        plt.scatter(x[m], y[m], s=size * 4, c=color, alpha=0.9, label=label)
+
+    plt.gca().invert_yaxis()
+    plt.axis("equal")
+    plt.axis("off")
+    plt.legend(markerscale=3, frameon=False)
+    title = f"{sample_name}: B subtypes over follicle"
+    if title_suffix:
+        title = f"{title} ({title_suffix})"
+    plt.title(title)
+    plt.show()
