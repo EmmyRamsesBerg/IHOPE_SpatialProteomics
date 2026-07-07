@@ -55,6 +55,25 @@ def _step(value):
     else:
         return 10.0
 
+
+def _nice_step(vmax, max_ticks):
+    """
+    Pick a round tick step for a 0-to-vmax scale that yields at most
+    max_ticks ticks (excluding 0). Chooses the smallest round step (1, 2,
+    2.5 or 5 times a power of ten) whose tick count fits, which keeps as
+    many clean ticks as the width allows rather than rounding up so far
+    that only a single tick remains.
+    """
+    if vmax <= 0 or max_ticks < 1:
+        return 1.0
+    bases = [1, 2, 2.5, 5]
+    steps = sorted({b * (10.0 ** e) for e in range(-3, 7) for b in bases})
+    for s in steps:
+        n_ticks = int(np.floor(vmax / s + 1e-9))
+        if n_ticks <= max_ticks:
+            return s
+    return steps[-1]
+
 # Data loading
 
 def load_celltype_summaries(
@@ -469,6 +488,7 @@ def plot_celltype_heatmap(
     colorbar_legend=None,
     scale="linear",
     vmax=None,
+    narrow=False,
 ):
     """
     Static heatmap of cell types × samples (or tissues).
@@ -492,12 +512,29 @@ def plot_celltype_heatmap(
         taken from the actual data maximum so the scale adapts to the range
         present (e.g. after rescaling to percentage of immune cells). Ignored
         for log scale. Pass a number to fix the scale across figures.
+    narrow : bool
+        Layout tweaks for heatmaps with very few columns, such as the
+        tissue-grouped heatmap (three columns). When True, the auto figure
+        width reserves extra room for long row labels and the linear
+        colorbar uses fewer, rounder ticks so they do not crowd. Default
+        False keeps the original sizing and ticks, so sample-level heatmaps
+        are unchanged.
     """
     n_rows, n_cols = matrix.shape
 
     if figsize is None:
         tile_size = 0.35
-        figsize = (n_cols * tile_size, n_rows * tile_size)
+        if narrow:
+            # Row labels can be long (e.g. "CD4 T cells / T cells"), so
+            # reserve horizontal room for them. Scaling width on column count
+            # alone left no space for the labels and colorbar on a
+            # few-column matrix, which made tight_layout fail.
+            max_label_len = max((len(str(lbl)) for lbl in matrix.index), default=1)
+            width = n_cols * tile_size + 0.07 * max_label_len
+            height = max(n_rows * tile_size, 2.0)
+            figsize = (width, height)
+        else:
+            figsize = (n_cols * tile_size, n_rows * tile_size)
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -508,7 +545,17 @@ def plot_celltype_heatmap(
         vmin = 0
         if vmax is None:
             vmax = float(np.nanmax(matrix.values))
-        tick_step = _step(vmax)
+        if narrow:
+            # The horizontal colorbar spans the heatmap columns, so its width
+            # in inches is roughly the column count times the tile size. Allow
+            # about one tick per 0.6 inch so a few-column bar is not crowded.
+            cbar_width_estimate = n_cols * 0.35
+            max_cbar_ticks = max(2, int(cbar_width_estimate / 0.6))
+            # Allow one extra over the width estimate so a low-vmax bar keeps
+            # at least two ticks (e.g. 10, 20, 30) instead of a single value.
+            tick_step = _nice_step(vmax, max_cbar_ticks + 1)
+        else:
+            tick_step = _step(vmax)
     elif scale == "log":
         vmin = np.nanmin(matrix.values)
 
