@@ -1008,6 +1008,10 @@ def plot_celltype_stripplot(
     celltype_order=None,
     cell_types=None,
     denominator_cell_type=None,
+    parent_of=None,
+    root_children=None,
+    display_names=None,
+    root_label="immune cells",
     ylim=None,
     ylabel=None,
     ncols=3,
@@ -1068,7 +1072,30 @@ def plot_celltype_stripplot(
         lineage rather than percentage of total cells. Looked up from
         the full df passed in, before any level or cell_types filtering,
         so pass the unfiltered dataframe when using this. Mutually
-        exclusive with immune_only and drop_unclassified.
+        exclusive with immune_only, drop_unclassified and parent_of.
+    parent_of : dict[str, str] or None
+        Per-facet denominator mapping of child cell_type to the parent
+        cell_type whose own total is the denominator, same object used by
+        normalise_to_parent. When set, each facet is divided by its own
+        parent (looked up across all levels in the full df passed in) and
+        multiplied by 100, so every facet is a percentage of its parent.
+        Facets are restricted to the keys of parent_of plus any
+        root_children present at the faceted level, so parentless cell
+        types (structural, unclassified) drop out on their own. Biology
+        lives in the notebook, not here. Mutually exclusive with
+        denominator_cell_type, immune_only and drop_unclassified.
+    root_children : list[str] or None
+        Top-level cell types (e.g. the immune types) that have no single
+        parent row. When one is faceted, it is divided by the per-sample
+        sum over the root_children that are present, which is their
+        combined parent population. Same convention as normalise_to_parent.
+    display_names : dict[str, str] or None
+        Optional cell_type to display-name map used for the "child /
+        parent" facet titles when parent_of is set. Cell types not listed
+        fall back to underscores replaced by spaces.
+    root_label : str
+        Display name for the combined root denominator in facet titles
+        (e.g. "immune cells"). Only used when parent_of is set.
     ylim : tuple or None
         Shared y-axis limit across all facets. Default None, meaning
         each facet's y-axis is scaled by matplotlib to fit its own data.
@@ -1103,8 +1130,24 @@ def plot_celltype_stripplot(
         raise ValueError(
             "drop_unclassified and denominator_cell_type are mutually exclusive."
         )
+    if parent_of is not None:
+        if denominator_cell_type is not None:
+            raise ValueError(
+                "parent_of and denominator_cell_type are mutually exclusive."
+            )
+        if immune_only:
+            raise ValueError("parent_of and immune_only are mutually exclusive.")
+        if drop_unclassified:
+            raise ValueError(
+                "parent_of and drop_unclassified are mutually exclusive."
+            )
 
     df_full = df.copy()
+
+    def _disp(ct):
+        if display_names and ct in display_names:
+            return display_names[ct]
+        return ct.replace("_", " ")
 
     denom_lookup = None
     ylabel_default = "Percentage of cells"
@@ -1128,6 +1171,10 @@ def plot_celltype_stripplot(
     if cell_types is not None:
         df = df[df["cell_type"].isin(cell_types)]
 
+    if parent_of is not None:
+        allowed = set(parent_of.keys()) | set(root_children or [])
+        df = df[df["cell_type"].isin(allowed)]
+
     if immune_only:
         if structural_cell_types is None:
             raise ValueError(
@@ -1147,6 +1194,41 @@ def plot_celltype_stripplot(
             lambda row: row["pct_total"] / denom_lookup.get(row["sample"], np.nan) * 100,
             axis=1,
         )
+    elif parent_of is not None:
+        present_at_level = set(df["cell_type"].unique())
+        roots_present = [r for r in (root_children or []) if r in present_at_level]
+
+        # Combined root denominator, the per-sample sum over the root
+        # children that are present, matching normalise_to_parent.
+        root_denom = (
+            df_full[df_full["cell_type"].isin(roots_present)]
+            .groupby("sample")["pct_total"].sum()
+            if roots_present else None
+        )
+
+        # One denominator Series per faceted cell type, indexed by sample.
+        # Parent rows are read from the unfiltered df_full, so a parent at
+        # any level (e.g. CD4_T at intermediate, B at type) resolves.
+        parent_series = {}
+        for ct in present_at_level:
+            if ct in parent_of:
+                parent = parent_of[ct]
+                rows = df_full[df_full["cell_type"] == parent]
+                parent_series[ct] = rows.set_index("sample")["pct_total"]
+            elif ct in roots_present and root_denom is not None:
+                parent_series[ct] = root_denom
+
+        def _parent_value(row):
+            s = parent_series.get(row["cell_type"])
+            if s is None:
+                return np.nan
+            d = s.get(row["sample"], np.nan)
+            if not d or np.isnan(d):
+                return np.nan
+            return row["pct_total"] / d * 100
+
+        df["pct_total"] = df.apply(_parent_value, axis=1)
+        ylabel_default = "Percentage"
 
     if ylabel is None:
         ylabel = ylabel_default
@@ -1214,7 +1296,13 @@ def plot_celltype_stripplot(
 
         ax.set_xticks(range(len(x_groups)))
         ax.set_xticklabels(x_groups, rotation=45, ha="right")
-        ax.set_title(_display_label(ct), fontsize=10)
+        if parent_of is not None and ct in parent_of:
+            facet_title = f"{_disp(ct)}\n/ {_disp(parent_of[ct])}"
+        elif parent_of is not None and root_children and ct in root_children:
+            facet_title = f"{_disp(ct)}\n/ {root_label}"
+        else:
+            facet_title = _display_label(ct)
+        ax.set_title(facet_title, fontsize=10)
         if ylim is not None:
             ax.set_ylim(*ylim)
         ax.spines["top"].set_visible(False)
