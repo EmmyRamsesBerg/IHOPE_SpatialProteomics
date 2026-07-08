@@ -26,6 +26,7 @@ from typing import Optional, Sequence, Union
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
 import seaborn as sns
 import scanpy as sc
@@ -193,7 +194,11 @@ def plot_marker(
         vals = _get_marker_values(adata, marker, marker_prefix)
         sctr = ax.scatter(x, y, c=vals, cmap=cmap, s=size, alpha=alpha,
                           linewidths=0, rasterized=True)
-        fig.colorbar(sctr, ax=ax, shrink=0.7, label=marker)
+        # tighten the axes box to the data so the colorbar hugs the tissue
+        ax.set_xlim(x.min(), x.max())
+        ax.set_ylim(y.min(), y.max())
+        cax = make_axes_locatable(ax).append_axes("right", size="4%", pad=0.05)
+        fig.colorbar(sctr, cax=cax, label=marker)
         mode = "intensity"
 
     ax.set_title(f"{base_name} {marker} {mode}".strip())
@@ -319,7 +324,7 @@ def plot_celltypes(
               frameon=False, fontsize=8)
 
     tag = level if level is not None else "celltypes"
-    ax.set_title(f"{base_name} {tag}".strip())
+    ax.set_title(base_name)
     if invert_y:
         ax.invert_yaxis()
     fig.tight_layout()
