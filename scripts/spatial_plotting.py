@@ -120,11 +120,13 @@ def _resolve_celltype_columns(
     return cols
 
 
-def _new_axes(figsize):
-    """White figure and axes with equal aspect and no grid."""
+def _new_axes(figsize, facecolor="white"):
+    """Figure and axes with equal aspect and no grid. facecolor sets both the
+    figure and the axes background, defaulting to white so existing callers are
+    unchanged."""
     fig, ax = plt.subplots(figsize=figsize)
-    fig.patch.set_facecolor("white")
-    ax.set_facecolor("white")
+    fig.patch.set_facecolor(facecolor)
+    ax.set_facecolor(facecolor)
     ax.set_aspect("equal")          # keep tissue geometry undistorted
     ax.grid(False)
     ax.axis("off")                  # hide coordinate axes and ticks
@@ -224,9 +226,12 @@ def plot_celltypes(
     base_name: str = "",
     include: Optional[Sequence[str]] = None,
     palette: Optional[dict] = None,
+    labels: Optional[dict] = None,
     drop_unassigned: bool = True,
     background_color: str = "#d9d9d9",
     background_alpha: float = 0.25,
+    bg: str = "white",
+    text_color: str = "black",
     size: float = 5,
     alpha: float = 0.7,
     figsize=(7, 7),
@@ -251,6 +256,13 @@ def plot_celltypes(
     palette            optional colour map keyed by raw column name or cleaned
                        label. Pass the same dict across samples to keep colours
                        stable for comparison. Missing types get a fallback.
+    labels             optional display-name map keyed by raw column name or
+                       cleaned label, for example {"T": "T cells"}. Only the
+                       legend text changes. Unset falls back to cleaned labels.
+    bg                 figure and axes background colour. Default white. Set to
+                       black for a fluorescence-style plot.
+    text_color         colour for the title and legend text. Default black. Use
+                       white on a dark background.
     drop_unassigned    columns ending in _unassigned are sent to background.
     min_cells          columns with fewer positive cells than this are dropped.
 
@@ -299,7 +311,7 @@ def plot_celltypes(
         for c, col in zip(needs_color, fallback):
             resolved[c] = col
 
-    fig, ax = _new_axes(figsize)
+    fig, ax = _new_axes(figsize, facecolor=bg)
 
     # background is every cell not positive for any plotted column
     any_pos = np.zeros(adata.n_obs, dtype=bool)
@@ -314,17 +326,31 @@ def plot_celltypes(
         ax.scatter(x[mask], y[mask], c=[resolved[c]], s=size, alpha=alpha,
                    linewidths=0, rasterized=True)
 
+    def _display_label_ct(c):
+        # honour an explicit labels map keyed by raw column name or cleaned
+        # label, otherwise fall back to the cleaned label
+        if labels:
+            if c in labels:
+                return labels[c]
+            cleaned = _clean_label(c)
+            if cleaned in labels:
+                return labels[cleaned]
+        return _clean_label(c)
+
     handles = [
         Line2D([0], [0], marker="o", linestyle="", markersize=6,
                markerfacecolor=resolved[c], markeredgewidth=0)
         for c in cols
     ]
-    ax.legend(handles, [_clean_label(c) for c in cols],
-              bbox_to_anchor=(1.02, 1), loc="upper left",
-              frameon=False, fontsize=8)
+    legend = ax.legend(handles, [_display_label_ct(c) for c in cols],
+                       bbox_to_anchor=(1.02, 1), loc="upper left",
+                       frameon=False, fontsize=8)
+    # colour the legend text so it stays readable on a dark background
+    for text in legend.get_texts():
+        text.set_color(text_color)
 
     tag = level if level is not None else "celltypes"
-    ax.set_title(base_name)
+    ax.set_title(base_name, color=text_color)
     if invert_y:
         ax.invert_yaxis()
     fig.tight_layout()
