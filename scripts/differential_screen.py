@@ -536,19 +536,11 @@ def plot_fc_lollipop(
 
     rows_per = [len(facet[lv]) for lv in levels_present]
     total_rows = sum(rows_per)
-    # the top facet carries both the colour and size legends stacked, so give
-    # every facet a height floor in the ratio, otherwise a short top facet is
-    # too thin for its two legends
-    ratio = [max(r, 3) for r in rows_per]
     if figsize is None:
-        # a single facet stacks both legends on the right, so it needs enough
-        # height for them, not just for its rows
-        min_h = 4.2 if len(levels_present) == 1 else 2.6
-        figsize = (8.5, max(min_h, 0.34 * sum(ratio) + 0.5 * len(levels_present)))
+        figsize = (8.5, max(2.2, 0.34 * total_rows + 0.9 * len(levels_present)))
 
-    fig = plt.figure(figsize=figsize, constrained_layout=True)
-    gs = GridSpec(len(levels_present), 1, height_ratios=ratio, hspace=0.45,
-                  figure=fig)
+    fig = plt.figure(figsize=figsize)
+    gs = GridSpec(len(levels_present), 1, height_ratios=rows_per, hspace=0.45)
     axes = []
 
     for i, lv in enumerate(levels_present):
@@ -594,48 +586,37 @@ def plot_fc_lollipop(
         ha="left", va="top", fontsize=8, color="0.35", annotation_clip=False,
     )
 
-    # colour legend once on the top facet
+    # colour legend on the top facet
     color_handles = [
         Line2D([0], [0], marker="o", linestyle="", markerfacecolor=agree_color,
                markeredgecolor="white", markersize=8, label="both donors agree"),
         Line2D([0], [0], marker="o", linestyle="", markerfacecolor=disagree_color,
                markeredgecolor="white", markersize=8, label="donors disagree"),
     ]
-    leg_color = axes[0].legend(
+    leg1 = axes[0].legend(
         handles=color_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
         frameon=False, fontsize=8, title="direction", title_fontsize=8,
     )
-    axes[0].add_artist(leg_color)
+    axes[0].add_artist(leg1)
 
-    # a size legend on every facet, so no panel reads as bare. Scaling is
-    # global, so a dot size means the same abundance in every panel, but each
-    # legend samples that panel's own abundances so its reference values are
-    # relevant to what is shown there. On the top facet it sits below the colour
-    # legend rather than overprinting it.
-    def _size_handles(values):
-        return [
+    # size legend with representative abundance values
+    if ab_all.size:
+        ref = np.unique(np.quantile(ab_all, [0.1, 0.5, 0.9]).round(1))
+        size_handles = [
             Line2D([0], [0], marker="o", linestyle="", markerfacecolor="0.5",
                    markeredgecolor="white", markersize=np.sqrt(_size(v)),
                    label=f"{v:g}%")
-            for v in values
+            for v in ref
         ]
-
-    for i, lv in enumerate(levels_present):
-        fab = facet[lv]["abundance"].to_numpy()
-        fab = fab[np.isfinite(fab)]
-        if not fab.size:
-            continue
-        ref = np.unique(np.quantile(fab, [0.1, 0.5, 0.9]).round(1))
-        anchor = (1.02, 0.5) if i == 0 else (1.02, 1.0)
-        loc = "center left" if i == 0 else "upper left"
-        leg_size = axes[i].legend(
-            handles=_size_handles(ref), loc=loc, bbox_to_anchor=anchor,
+        target = axes[1] if len(axes) > 1 else axes[0]
+        target.legend(
+            handles=size_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
             frameon=False, fontsize=8, title="abundance\n(larger group)",
             title_fontsize=8, labelspacing=1.3, borderpad=1.0,
         )
-        axes[i].add_artist(leg_size)
 
     if title:
         fig.suptitle(title, fontsize=12, x=0.05, ha="left")
+    fig.tight_layout()
     return fig, axes
 
