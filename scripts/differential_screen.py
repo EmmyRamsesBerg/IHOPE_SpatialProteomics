@@ -536,11 +536,19 @@ def plot_fc_lollipop(
 
     rows_per = [len(facet[lv]) for lv in levels_present]
     total_rows = sum(rows_per)
+    # single facet stacks both legends on the right, so it needs vertical room
+    min_h = 4.0 if len(levels_present) == 1 else 2.4
     if figsize is None:
-        figsize = (8.5, max(2.2, 0.34 * total_rows + 0.9 * len(levels_present)))
+        figsize = (10.0, max(min_h, 0.34 * total_rows + 0.9 * len(levels_present)))
 
     fig = plt.figure(figsize=figsize)
-    gs = GridSpec(len(levels_present), 1, height_ratios=rows_per, hspace=0.45)
+    # reserve the right margin for the legends explicitly. tight_layout does not
+    # account for legends anchored outside the axes, so without this they are
+    # clipped by the figure edge.
+    gs = GridSpec(
+        len(levels_present), 1, height_ratios=rows_per, hspace=0.45,
+        figure=fig, left=0.20, right=0.74, top=0.90, bottom=0.14,
+    )
     axes = []
 
     for i, lv in enumerate(levels_present):
@@ -586,20 +594,23 @@ def plot_fc_lollipop(
         ha="left", va="top", fontsize=8, color="0.35", annotation_clip=False,
     )
 
-    # colour legend on the top facet
+    # Both legends are attached to the figure, not to an axis, and placed in the
+    # right margin reserved by the GridSpec above. Figure coordinates mean the
+    # placement does not depend on how many facets there are, so the single
+    # facet case cannot stack them on top of each other, and staying inside the
+    # canvas means they cannot be clipped by the figure edge.
     color_handles = [
         Line2D([0], [0], marker="o", linestyle="", markerfacecolor=agree_color,
                markeredgecolor="white", markersize=8, label="both donors agree"),
         Line2D([0], [0], marker="o", linestyle="", markerfacecolor=disagree_color,
                markeredgecolor="white", markersize=8, label="donors disagree"),
     ]
-    leg1 = axes[0].legend(
-        handles=color_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
-        frameon=False, fontsize=8, title="direction", title_fontsize=8,
+    fig.legend(
+        handles=color_handles, loc="upper left", bbox_to_anchor=(0.76, 0.90),
+        bbox_transform=fig.transFigure, frameon=False, fontsize=8,
+        title="direction", title_fontsize=8,
     )
-    axes[0].add_artist(leg1)
 
-    # size legend with representative abundance values
     if ab_all.size:
         ref = np.unique(np.quantile(ab_all, [0.1, 0.5, 0.9]).round(1))
         size_handles = [
@@ -608,15 +619,14 @@ def plot_fc_lollipop(
                    label=f"{v:g}%")
             for v in ref
         ]
-        target = axes[1] if len(axes) > 1 else axes[0]
-        target.legend(
-            handles=size_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
-            frameon=False, fontsize=8, title="abundance\n(larger group)",
-            title_fontsize=8, labelspacing=1.3, borderpad=1.0,
+        fig.legend(
+            handles=size_handles, loc="upper left", bbox_to_anchor=(0.76, 0.62),
+            bbox_transform=fig.transFigure, frameon=False, fontsize=8,
+            title="abundance\n(larger group)", title_fontsize=8,
+            labelspacing=1.4, borderpad=0.8,
         )
 
     if title:
         fig.suptitle(title, fontsize=12, x=0.05, ha="left")
-    fig.tight_layout()
     return fig, axes
 

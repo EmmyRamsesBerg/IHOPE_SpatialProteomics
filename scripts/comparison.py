@@ -804,6 +804,7 @@ def plot_celltype_stacked_barplot(
     drop_unclassified=False,
     ylabel=None,
     tissue_order=None,
+    celltype_order=None,
 ):
     """
     Stacked barplot of cell type composition.
@@ -860,6 +861,13 @@ def plot_celltype_stacked_barplot(
         labels themselves are sorted directly by this order. When None
         (default), falls back to alphabetical order. Same convention as
         tissue_order in pivot_for_heatmap.
+    celltype_order : list[str] or None
+        Manual display order for the stacked segments and legend (e.g.
+        ["TEMRA_CD4", "TN_CD4", "TEM_CD4", "TCM_CD4"]). Cell types not
+        listed are appended after the listed ones, in their existing
+        order. When None (default), falls back to the current behaviour
+        of sorting segments by mean fraction across x-groups, largest
+        first.
     """
     required = {"level", "cell_type", "pct_total", x}
     missing = required - set(df.columns)
@@ -935,7 +943,15 @@ def plot_celltype_stacked_barplot(
                 )
             ]
 
-    order = matrix.mean(axis=0).sort_values(ascending=False).index
+    if celltype_order:
+        order = pd.Index(
+            sorted(
+                matrix.columns,
+                key=lambda ct: (_manual_order_position(ct, celltype_order), ct),
+            )
+        )
+    else:
+        order = matrix.mean(axis=0).sort_values(ascending=False).index
     matrix = matrix[order]
 
     if palette is None:
