@@ -1,3 +1,4 @@
+from itertools import combinations
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -5,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from scipy.stats import mannwhitneyu
 
 # Label formatting
 
@@ -1034,6 +1036,7 @@ def plot_celltype_stripplot(
     figsize=None,
     jitter=0.08,
     point_size=30,
+    mannwhitney=False,
 ):
     """
     Facet grid with one subplot per cell type, showing individual sample
@@ -1129,6 +1132,18 @@ def plot_celltype_stripplot(
         units. Set to 0 to disable.
     point_size : float
         Marker size for the individual points.
+    mannwhitney : bool
+        If True, run a Mann-Whitney U test (scipy.stats.mannwhitneyu,
+        two-sided) between every pair of x-groups present in each facet,
+        and annotate the facet with a bracket and the raw p-value (e.g.
+        "p = 0.31") for each pair. This is a formality, not a claim of
+        statistical significance, especially at the sample sizes typical
+        here, so no significance stars or thresholds are applied. Pairs
+        are stacked bottom-to-top by increasing span (adjacent x-groups
+        first) so brackets don't overlap, and the axis is expanded as
+        needed to fit them, overriding ylim's upper bound if it would
+        otherwise clip a bracket. Default False (no test, current
+        behaviour unchanged).
     """
     required = {"level", "cell_type", "pct_total", "sample", "donor", x}
     missing = required - set(df.columns)
@@ -1321,6 +1336,54 @@ def plot_celltype_stripplot(
         ax.set_title(facet_title, fontsize=10)
         if ylim is not None:
             ax.set_ylim(*ylim)
+
+        if mannwhitney:
+            present_groups = [
+                val for val in x_groups if not sub[sub[x] == val].empty
+            ]
+            pairs = list(combinations(present_groups, 2))
+            # Adjacent x-groups get the lowest brackets, wider spans stack
+            # above them, so brackets don't overlap.
+            pairs.sort(key=lambda p: abs(x_positions[p[1]] - x_positions[p[0]]))
+
+            if pairs:
+                data_min = sub["pct_total"].min()
+                data_max = sub["pct_total"].max()
+                data_range = (data_max - data_min) or (abs(data_max) or 1.0)
+                step = data_range * 0.12
+                base = data_max + step
+
+                for i, (g1, g2) in enumerate(pairs):
+                    vals1 = sub.loc[sub[x] == g1, "pct_total"].values
+                    vals2 = sub.loc[sub[x] == g2, "pct_total"].values
+                    if len(vals1) == 0 or len(vals2) == 0:
+                        continue
+                    try:
+                        _, p_value = mannwhitneyu(vals1, vals2, alternative="two-sided")
+                    except ValueError:
+                        # e.g. all values identical or a group too small
+                        continue
+
+                    y = base + i * step
+                    bracket_top = y + step * 0.15
+                    x1, x2 = x_positions[g1], x_positions[g2]
+                    ax.plot(
+                        [x1, x1, x2, x2],
+                        [y, bracket_top, bracket_top, y],
+                        color="black", linewidth=0.8, zorder=4,
+                    )
+                    ax.text(
+                        (x1 + x2) / 2, bracket_top + step * 0.05,
+                        f"p = {p_value:.2f}",
+                        ha="center", va="bottom", fontsize=7, zorder=4,
+                    )
+
+                # Grow the axis to fit the brackets, overriding ylim's
+                # upper bound (set just above) if it would clip them.
+                top_needed = base + len(pairs) * step + step
+                current_bottom, current_top = ax.get_ylim()
+                ax.set_ylim(current_bottom, max(current_top, top_needed))
+
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.grid(False)
