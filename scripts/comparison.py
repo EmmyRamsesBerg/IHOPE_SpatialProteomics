@@ -791,6 +791,48 @@ def _rescale_to_100(df, group_cols):
     return df
 
 
+def _spread_positions(values, min_gap):
+    """
+    Nudge a sorted list of y-values apart so consecutive values are at
+    least min_gap apart, distributing each overlap symmetrically around
+    the midpoint of the close pair rather than only pushing the higher
+    one up. Used to keep plot_celltype_stripplot's reference-line labels
+    (e.g. "MedLN" / "MesLN") legible when the two medians land close
+    together; only the label position is adjusted, never the line itself.
+
+    Parameters
+    ----------
+    values : list[float]
+        Y-values, already sorted ascending.
+    min_gap : float
+        Minimum allowed distance between consecutive values.
+
+    Returns
+    -------
+    list[float]
+        Adjusted values, same order and length as the input.
+    """
+    positions = list(values)
+    n = len(positions)
+    if n < 2 or min_gap <= 0:
+        return positions
+    # A handful of passes fully resolves the 2-3 labels these plots use;
+    # each pass clears any remaining overlap by splitting it evenly
+    # between the two members of the closest pair.
+    for _ in range(n):
+        moved = False
+        for i in range(n - 1):
+            gap = positions[i + 1] - positions[i]
+            if gap < min_gap:
+                shift = (min_gap - gap) / 2
+                positions[i] -= shift
+                positions[i + 1] += shift
+                moved = True
+        if not moved:
+            break
+    return positions
+
+
 def plot_celltype_stacked_barplot(
     df,
     levels=None,
@@ -1013,173 +1055,46 @@ def plot_celltype_stacked_barplot(
 
     return palette
 
-def plot_celltype_stripplot(
-    df,
-    level="type",
-    x="tissue",
-    tissue_order=None,
-    donor_colors=None,
-    summary="bar",
+def _stripplot_prepare_facet_data(
+    df_full,
+    level,
+    cell_types=None,
     immune_only=False,
     structural_cell_types=None,
     drop_unclassified=False,
-    celltype_order=None,
-    cell_types=None,
     denominator_cell_type=None,
     parent_of=None,
     root_children=None,
-    display_names=None,
-    root_label="immune cells",
-    ylim=None,
-    ylabel=None,
-    ncols=3,
-    figsize=None,
-    jitter=0.08,
-    point_size=30,
-    mannwhitney=False,
 ):
     """
-    Facet grid with one subplot per cell type, showing individual sample
-    points grouped by tissue, colored by donor.
+    Level-filter and normalise a combined summary dataframe for
+    plot_celltype_stripplot.
 
-    Unlike plot_celltype_stacked_barplot, nothing is averaged across ROIs
-    or donors. Every sample is its own point, so a donor with multiple
-    ROIs in the same tissue shows multiple points there.
+    This is the data-prep half of plot_celltype_stripplot, pulled out on
+    its own so it can be run twice with identical arguments: once for the
+    dataframe being plotted, and once for a reference dataframe (e.g. the
+    lymph node samples used as a reference for a spleen-only plot). Running
+    the exact same normalisation both times is what makes the resulting
+    percentages comparable, whichever mode is in use (raw percentage of
+    all cells, percentage of immune cells, percentage of a denominator
+    cell type, or percentage of a named parent population).
 
     Parameters
     ----------
-    df : DataFrame
-        Full combined summary dataframe, all levels and all samples.
-        Must contain ['level', 'cell_type', 'pct_total', 'sample', 'donor', x].
-        Pass the unfiltered dataframe even when using cell_types to
-        restrict the facets, since denominator_cell_type (when set) needs
-        to look up values at the intermediate level that would otherwise
-        be filtered out.
-    level : str
-        Single hierarchy level to facet over (e.g. "type", "subtype").
-    x : str
-        Column to use as the x-axis within each subplot. Default "tissue".
-    tissue_order : list[str] or None
-        Manual display order for the x-axis groups. Falls back to
-        alphabetical order when None.
-    donor_colors : dict[str, color]
-        Mapping of donor id to a matplotlib color. Required.
-    summary : "bar", "box", or None
-        What to draw alongside the points for each x-group.
-    immune_only : bool
-        If True, drop structural_cell_types and unclassified, then
-        rescale remaining percentages to sum to 100 within each sample.
-        Requires structural_cell_types. Mutually exclusive with
-        denominator_cell_type, since both define what pct_total means.
-    structural_cell_types : list[str] or None
-        Structural cell types to drop when immune_only is True.
-    drop_unclassified : bool
-        If True, drop 'unclassified' and rescale to 100 within each
-        sample. Ignored if immune_only is True.
-    celltype_order : list[str] or None
-        Manual order for the facets. Falls back to alphabetical order
-        when None.
-    cell_types : list[str] or None
-        Restrict facets to this list of cell_type names within the given
-        level. When None (default), all cell types found at that level
-        are faceted, same as before this parameter existed.
-    denominator_cell_type : str or None
-        Name of a cell_type at the intermediate level (e.g. "CD4_T") to
-        use as the denominator. When set, each facet's pct_total is
-        divided by that sample's percentage for denominator_cell_type
-        and multiplied by 100, so values become percentage of that
-        lineage rather than percentage of total cells. Looked up from
-        the full df passed in, before any level or cell_types filtering,
-        so pass the unfiltered dataframe when using this. Mutually
-        exclusive with immune_only, drop_unclassified and parent_of.
-    parent_of : dict[str, str] or None
-        Per-facet denominator mapping of child cell_type to the parent
-        cell_type whose own total is the denominator, same object used by
-        normalise_to_parent. When set, each facet is divided by its own
-        parent (looked up across all levels in the full df passed in) and
-        multiplied by 100, so every facet is a percentage of its parent.
-        Facets are restricted to the keys of parent_of plus any
-        root_children present at the faceted level, so parentless cell
-        types (structural, unclassified) drop out on their own. Biology
-        lives in the notebook, not here. Mutually exclusive with
-        denominator_cell_type, immune_only and drop_unclassified.
-    root_children : list[str] or None
-        Top-level cell types (e.g. the immune types) that have no single
-        parent row. When one is faceted, it is divided by the per-sample
-        sum over the root_children that are present, which is their
-        combined parent population. Same convention as normalise_to_parent.
-    display_names : dict[str, str] or None
-        Optional cell_type to display-name map used for the "child /
-        parent" facet titles when parent_of is set. Cell types not listed
-        fall back to underscores replaced by spaces.
-    root_label : str
-        Display name for the combined root denominator in facet titles
-        (e.g. "immune cells"). Only used when parent_of is set.
-    ylim : tuple or None
-        Shared y-axis limit across all facets. Default None, meaning
-        each facet's y-axis is scaled by matplotlib to fit its own data.
-    ylabel : str or None
-        Shared y-axis label. Overrides the automatic label, including
-        the denominator_cell_type default, when provided.
-    ncols : int
-        Number of facet columns requested. Automatically capped to the
-        number of facets actually present, so a single-facet plot uses
-        a single column rather than reserving empty space.
-    figsize : tuple or None
-        Auto-computed from the number of facets when None.
-    jitter : float
-        Horizontal jitter applied to points within each x-group, in axis
-        units. Set to 0 to disable.
-    point_size : float
-        Marker size for the individual points.
-    mannwhitney : bool
-        If True, run a Mann-Whitney U test (scipy.stats.mannwhitneyu,
-        two-sided) between every pair of x-groups present in each facet,
-        and annotate the facet with a bracket and the raw p-value (e.g.
-        "p = 0.31") for each pair. This is a formality, not a claim of
-        statistical significance, especially at the sample sizes typical
-        here, so no significance stars or thresholds are applied. Pairs
-        are stacked bottom-to-top by increasing span (adjacent x-groups
-        first) so brackets don't overlap, and the axis is expanded as
-        needed to fit them, overriding ylim's upper bound if it would
-        otherwise clip a bracket. Default False (no test, current
-        behaviour unchanged).
+    df_full : DataFrame
+        Unfiltered dataframe (all levels, all samples) that
+        denominator_cell_type and parent_of look up their denominators
+        from. Other parameters mirror the like-named parameters on
+        plot_celltype_stripplot.
+
+    Returns
+    -------
+    (processed_df, ylabel_default)
+        processed_df is level-filtered to `level`, restricted to
+        cell_types/parent_of keys when given, and has pct_total rewritten
+        to whichever percentage basis the chosen mode produces.
+        ylabel_default is the matching default y-axis label.
     """
-    required = {"level", "cell_type", "pct_total", "sample", "donor", x}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
-    if donor_colors is None:
-        raise ValueError("donor_colors is required (mapping of donor id to color).")
-    if summary not in ("bar", "box", None):
-        raise ValueError('summary must be "bar", "box", or None')
-    if immune_only and denominator_cell_type is not None:
-        raise ValueError(
-            "immune_only and denominator_cell_type are mutually exclusive."
-        )
-    if drop_unclassified and denominator_cell_type is not None:
-        raise ValueError(
-            "drop_unclassified and denominator_cell_type are mutually exclusive."
-        )
-    if parent_of is not None:
-        if denominator_cell_type is not None:
-            raise ValueError(
-                "parent_of and denominator_cell_type are mutually exclusive."
-            )
-        if immune_only:
-            raise ValueError("parent_of and immune_only are mutually exclusive.")
-        if drop_unclassified:
-            raise ValueError(
-                "parent_of and drop_unclassified are mutually exclusive."
-            )
-
-    df_full = df.copy()
-
-    def _disp(ct):
-        if display_names and ct in display_names:
-            return display_names[ct]
-        return ct.replace("_", " ")
-
     denom_lookup = None
     ylabel_default = "Percentage of cells"
 
@@ -1261,6 +1176,233 @@ def plot_celltype_stripplot(
         df["pct_total"] = df.apply(_parent_value, axis=1)
         ylabel_default = "Percentage"
 
+    return df, ylabel_default
+
+
+def plot_celltype_stripplot(
+    df,
+    level="type",
+    x="tissue",
+    tissue_order=None,
+    donor_colors=None,
+    summary="bar",
+    immune_only=False,
+    structural_cell_types=None,
+    drop_unclassified=False,
+    celltype_order=None,
+    cell_types=None,
+    denominator_cell_type=None,
+    parent_of=None,
+    root_children=None,
+    display_names=None,
+    root_label="immune cells",
+    ylim=None,
+    ylabel=None,
+    ncols=3,
+    figsize=None,
+    jitter=0.08,
+    point_size=30,
+    mannwhitney=False,
+    reference_df=None,
+    reference_group_col="tissue",
+    reference_color="gray",
+):
+    """
+    Facet grid with one subplot per cell type, showing individual sample
+    points grouped by tissue, colored by donor.
+
+    Unlike plot_celltype_stacked_barplot, nothing is averaged across ROIs
+    or donors. Every sample is its own point, so a donor with multiple
+    ROIs in the same tissue shows multiple points there.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Full combined summary dataframe, all levels and all samples.
+        Must contain ['level', 'cell_type', 'pct_total', 'sample', 'donor', x].
+        Pass the unfiltered dataframe even when using cell_types to
+        restrict the facets, since denominator_cell_type (when set) needs
+        to look up values at the intermediate level that would otherwise
+        be filtered out.
+    level : str
+        Single hierarchy level to facet over (e.g. "type", "subtype").
+    x : str
+        Column to use as the x-axis within each subplot. Default "tissue".
+    tissue_order : list[str] or None
+        Manual display order for the x-axis groups. Falls back to
+        alphabetical order when None.
+    donor_colors : dict[str, color]
+        Mapping of donor id to a matplotlib color. Required.
+    summary : "bar", "box", or None
+        What to draw alongside the points for each x-group. "bar" draws
+        the median as a short dashed line (previously the mean); "box"
+        draws a boxplot, which is already median-centered.
+    immune_only : bool
+        If True, drop structural_cell_types and unclassified, then
+        rescale remaining percentages to sum to 100 within each sample.
+        Requires structural_cell_types. Mutually exclusive with
+        denominator_cell_type, since both define what pct_total means.
+    structural_cell_types : list[str] or None
+        Structural cell types to drop when immune_only is True.
+    drop_unclassified : bool
+        If True, drop 'unclassified' and rescale to 100 within each
+        sample. Ignored if immune_only is True.
+    celltype_order : list[str] or None
+        Manual order for the facets. Falls back to alphabetical order
+        when None.
+    cell_types : list[str] or None
+        Restrict facets to this list of cell_type names within the given
+        level. When None (default), all cell types found at that level
+        are faceted, same as before this parameter existed.
+    denominator_cell_type : str or None
+        Name of a cell_type at the intermediate level (e.g. "CD4_T") to
+        use as the denominator. When set, each facet's pct_total is
+        divided by that sample's percentage for denominator_cell_type
+        and multiplied by 100, so values become percentage of that
+        lineage rather than percentage of total cells. Looked up from
+        the full df passed in, before any level or cell_types filtering,
+        so pass the unfiltered dataframe when using this. Mutually
+        exclusive with immune_only, drop_unclassified and parent_of.
+    parent_of : dict[str, str] or None
+        Per-facet denominator mapping of child cell_type to the parent
+        cell_type whose own total is the denominator, same object used by
+        normalise_to_parent. When set, each facet is divided by its own
+        parent (looked up across all levels in the full df passed in) and
+        multiplied by 100, so every facet is a percentage of its parent.
+        Facets are restricted to the keys of parent_of plus any
+        root_children present at the faceted level, so parentless cell
+        types (structural, unclassified) drop out on their own. Biology
+        lives in the notebook, not here. Mutually exclusive with
+        denominator_cell_type, immune_only and drop_unclassified.
+    root_children : list[str] or None
+        Top-level cell types (e.g. the immune types) that have no single
+        parent row. When one is faceted, it is divided by the per-sample
+        sum over the root_children that are present, which is their
+        combined parent population. Same convention as normalise_to_parent.
+    display_names : dict[str, str] or None
+        Optional cell_type to display-name map used for the "child /
+        parent" facet titles when parent_of is set. Cell types not listed
+        fall back to underscores replaced by spaces.
+    root_label : str
+        Display name for the combined root denominator in facet titles
+        (e.g. "immune cells"). Only used when parent_of is set.
+    ylim : tuple or None
+        Shared y-axis limit across all facets. Default None, meaning
+        each facet's y-axis is scaled by matplotlib to fit its own data.
+    ylabel : str or None
+        Shared y-axis label. Overrides the automatic label, including
+        the denominator_cell_type default, when provided.
+    ncols : int
+        Number of facet columns requested. Automatically capped to the
+        number of facets actually present, so a single-facet plot uses
+        a single column rather than reserving empty space.
+    figsize : tuple or None
+        Auto-computed from the number of facets when None.
+    jitter : float
+        Horizontal jitter applied to points within each x-group, in axis
+        units. Set to 0 to disable.
+    point_size : float
+        Marker size for the individual points.
+    mannwhitney : bool
+        If True, run a Mann-Whitney U test (scipy.stats.mannwhitneyu,
+        two-sided) between every pair of x-groups present in each facet,
+        and annotate the facet with a bracket and the raw p-value (e.g.
+        "p = 0.31") for each pair. This is a formality, not a claim of
+        statistical significance, especially at the sample sizes typical
+        here, so no significance stars or thresholds are applied. Pairs
+        are stacked bottom-to-top by increasing span (adjacent x-groups
+        first) so brackets don't overlap, and the axis is expanded as
+        needed to fit them, overriding ylim's upper bound if it would
+        otherwise clip a bracket. Default False (no test, current
+        behaviour unchanged).
+    reference_df : DataFrame or None
+        A second combined summary dataframe (same required columns as df)
+        to draw horizontal reference lines from, one per distinct value of
+        reference_group_col found for that facet (e.g. one line for MedLN,
+        one for MesLN, when this is a spleen-only plot referencing the LN
+        samples). Each line is the median pct_total for that group in that
+        facet, computed after applying the exact same normalisation mode
+        (immune_only, drop_unclassified, denominator_cell_type, or
+        parent_of, whichever df is using) to reference_df, so it lands on
+        the same percentage basis as the plotted points. Lines are solid
+        and drawn in reference_color, labelled with the group value (e.g.
+        "MedLN") as text just past the right edge of the facet, in place
+        of a legend entry. Default None draws no reference lines, current
+        behaviour unchanged.
+    reference_group_col : str
+        Column in reference_df to group by when computing the reference
+        medians. Default "tissue" (e.g. to get one line per LN type).
+        Ignored when reference_df is None.
+    reference_color : color
+        Color used for every reference line and its label. Default
+        "gray". Ignored when reference_df is None.
+    """
+    required = {"level", "cell_type", "pct_total", "sample", "donor", x}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    if donor_colors is None:
+        raise ValueError("donor_colors is required (mapping of donor id to color).")
+    if summary not in ("bar", "box", None):
+        raise ValueError('summary must be "bar", "box", or None')
+    if immune_only and denominator_cell_type is not None:
+        raise ValueError(
+            "immune_only and denominator_cell_type are mutually exclusive."
+        )
+    if drop_unclassified and denominator_cell_type is not None:
+        raise ValueError(
+            "drop_unclassified and denominator_cell_type are mutually exclusive."
+        )
+    if parent_of is not None:
+        if denominator_cell_type is not None:
+            raise ValueError(
+                "parent_of and denominator_cell_type are mutually exclusive."
+            )
+        if immune_only:
+            raise ValueError("parent_of and immune_only are mutually exclusive.")
+        if drop_unclassified:
+            raise ValueError(
+                "parent_of and drop_unclassified are mutually exclusive."
+            )
+
+    def _disp(ct):
+        if display_names and ct in display_names:
+            return display_names[ct]
+        return ct.replace("_", " ")
+
+    norm_kwargs = dict(
+        cell_types=cell_types,
+        immune_only=immune_only,
+        structural_cell_types=structural_cell_types,
+        drop_unclassified=drop_unclassified,
+        denominator_cell_type=denominator_cell_type,
+        parent_of=parent_of,
+        root_children=root_children,
+    )
+
+    df, ylabel_default = _stripplot_prepare_facet_data(
+        df.copy(), level=level, **norm_kwargs,
+    )
+
+    # Reference dataframe (e.g. the LN samples, when df is spleen-only) is
+    # run through the exact same normalisation so its medians land on the
+    # same percentage basis as the plotted points, whichever mode is in
+    # use. Group values (e.g. "MedLN", "MesLN") are read from
+    # reference_group_col, kept in their sorted order so the two lines and
+    # labels are drawn in a stable order across facets.
+    ref_df = None
+    ref_group_values = []
+    if reference_df is not None:
+        if reference_group_col not in reference_df.columns:
+            raise ValueError(
+                f"reference_df is missing reference_group_col "
+                f"'{reference_group_col}'."
+            )
+        ref_df, _ = _stripplot_prepare_facet_data(
+            reference_df.copy(), level=level, **norm_kwargs,
+        )
+        ref_group_values = sorted(ref_df[reference_group_col].unique())
+
     if ylabel is None:
         ylabel = ylabel_default
 
@@ -1295,10 +1437,10 @@ def plot_celltype_stripplot(
             xpos = x_positions[val]
 
             if summary == "bar":
-                mean_val = group["pct_total"].mean()
+                median_val = group["pct_total"].median()
                 ax.plot(
                     [xpos - 0.3, xpos + 0.3],
-                    [mean_val, mean_val],
+                    [median_val, median_val],
                     color="black",
                     linewidth=1.5,
                     linestyle="--",
@@ -1325,6 +1467,29 @@ def plot_celltype_stripplot(
                 zorder=3,
             )
 
+        if ref_df is not None:
+            # Lines are always drawn at their true median value. Only the
+            # label draws elsewhere, once its position is worked out below
+            # (after ylim is finalised), so a close MedLN/MesLN pair
+            # doesn't print two overlapping strings.
+            ref_sub = ref_df[ref_df["cell_type"] == ct]
+            ref_points = []
+            for group_val in ref_group_values:
+                ref_vals = ref_sub.loc[
+                    ref_sub[reference_group_col] == group_val, "pct_total"
+                ]
+                if ref_vals.empty:
+                    continue
+                median_val = ref_vals.median()
+                ref_points.append((group_val, median_val))
+                ax.axhline(
+                    median_val,
+                    color=reference_color,
+                    linewidth=1.2,
+                    linestyle="-",
+                    zorder=1,
+                )
+
         ax.set_xticks(range(len(x_groups)))
         ax.set_xticklabels(x_groups, rotation=45, ha="right")
         if parent_of is not None and ct in parent_of:
@@ -1336,6 +1501,33 @@ def plot_celltype_stripplot(
         ax.set_title(facet_title, fontsize=10)
         if ylim is not None:
             ax.set_ylim(*ylim)
+
+        if ref_df is not None and ref_points:
+            # Label sits just past the right edge of the facet, in data
+            # coordinates for y (the line's value) and axes fraction for
+            # x, so it tracks the line regardless of how many x-groups
+            # the facet has. clip_on=False lets it draw outside the axes
+            # patch instead of being cut off. Computed only now, after
+            # ylim is finalised above, so the minimum-gap distance is
+            # based on the facet's actual final y-range. When two
+            # reference values land close together (e.g. MedLN and MesLN
+            # medians nearly equal), their labels are nudged apart
+            # vertically so they stay readable; this only moves the
+            # label, the axhline itself is always at the true value.
+            ref_points.sort(key=lambda p: p[1])
+            y_span = np.ptp(ax.get_ylim()) or 1.0
+            min_gap = y_span * 0.06
+            label_positions = _spread_positions(
+                [val for _, val in ref_points], min_gap,
+            )
+            for (group_val, _), label_y in zip(ref_points, label_positions):
+                ax.text(
+                    1.02, label_y, str(group_val),
+                    transform=ax.get_yaxis_transform(),
+                    va="center", ha="left",
+                    fontsize=7, color=reference_color,
+                    clip_on=False,
+                )
 
         if mannwhitney:
             present_groups = [
