@@ -238,3 +238,66 @@ def normalize_follicle_counts(df, count_col="total_immune_cells", per_n_cells=10
         df["n_follicles"] / df[count_col] * per_n_cells
     ).round(2)
     return df
+
+
+IMMUNE_TYPE_COLS = ["type_B", "type_T", "type_NK", "type_Myeloid"]
+
+
+def follicle_size_metrics(adata, sample_name):
+    """
+    Post-exclusion follicle size metrics for one sample: how big the
+    retained follicles are, not just how many there are.
+
+    Uses the 'follicle_cluster' column (>= 0 marks cells inside a follicle
+    that survived manual exclusion) together with the four immune type_
+    columns (IMMUNE_TYPE_COLS).
+
+    Parameters
+    ----------
+    adata : AnnData
+        Must have 'follicle_cluster' and IMMUNE_TYPE_COLS in .obs. Should be
+        called after apply_cluster_exclusions, so excluded clusters (-1) are
+        not counted.
+    sample_name : str
+        Sample identifier, stamped onto each row of the per-follicle table.
+
+    Returns
+    -------
+    summary : dict
+        'n_cells_in_follicles' and 'n_immune_cells_in_follicles', totals
+        across all retained follicles in this sample.
+    per_follicle_df : pandas.DataFrame
+        One row per retained follicle cluster, columns: 'sample',
+        'follicle_id', 'n_cells', 'n_immune_cells'.
+    """
+    immune_mask = adata.obs[IMMUNE_TYPE_COLS].any(axis=1)
+    in_follicle = adata.obs["follicle_cluster"] >= 0
+
+    rows = []
+    for label in sorted(adata.obs.loc[in_follicle, "follicle_cluster"].unique()):
+        cluster_mask = adata.obs["follicle_cluster"] == label
+        rows.append({
+            "sample": sample_name,
+            "follicle_id": int(label),
+            "n_cells": int(cluster_mask.sum()),
+            "n_immune_cells": int((cluster_mask & immune_mask).sum()),
+        })
+
+    per_follicle_df = pd.DataFrame(
+        rows, columns=["sample", "follicle_id", "n_cells", "n_immune_cells"]
+    )
+
+    summary = {
+        "n_cells_in_follicles": int(in_follicle.sum()),
+        "n_immune_cells_in_follicles": int((in_follicle & immune_mask).sum()),
+        "median_cells_per_follicle": (
+            round(per_follicle_df["n_cells"].median(), 2)
+            if len(per_follicle_df) else float("nan")
+        ),
+        "median_immune_cells_per_follicle": (
+            round(per_follicle_df["n_immune_cells"].median(), 2)
+            if len(per_follicle_df) else float("nan")
+        ),
+    }
+
+    return summary, per_follicle_df

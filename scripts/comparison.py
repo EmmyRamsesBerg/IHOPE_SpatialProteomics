@@ -1603,3 +1603,165 @@ def plot_celltype_stripplot(
 
     plt.tight_layout()
     plt.show()
+
+# Single-value tissue comparison (e.g. follicle counts)
+
+def plot_value_boxstrip_with_reference(
+    df,
+    value_col,
+    x="tissue",
+    order=None,
+    donor_colors=None,
+    figsize=(8, 6),
+    ylabel=None,
+    title=None,
+    box_color="0.85",
+    jitter=0.15,
+    point_size=6,
+    showfliers=False,
+    reference_df=None,
+    reference_group_col="tissue",
+    reference_color="gray",
+):
+    """
+    Boxplot + stripplot of a single value column across groups, colored by
+    donor. Single-axes version of the same visual convention used by
+    plot_celltype_stripplot, for a dataframe that already has one row per
+    sample and a single value column (e.g. follicle counts), rather than
+    the long level/cell_type/pct_total format that function expects.
+
+    The box always centers on the median (seaborn's default), never the
+    mean. When reference_df is given, it draws solid horizontal lines at
+    the median of value_col for each group found in reference_group_col
+    (e.g. one line for MedLN, one for MesLN, when df is spleen-only),
+    labelled past the right edge of the axis, reusing the same
+    label-spacing helper (_spread_positions) that plot_celltype_stripplot
+    uses so two close medians stay readable.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Must contain [value_col, "donor", x].
+    value_col : str
+        Column to plot on the y-axis (e.g. "follicles_per_10000_immune_cells").
+    x : str
+        Column to use as the x-axis groups. Default "tissue".
+    order : list[str] or None
+        Manual order for the x-axis groups (e.g. ["MedLN", "MesLN"], or
+        ["Spleen"]). When None, seaborn falls back to the order the values
+        are first seen in df.
+    donor_colors : dict[str, color]
+        Mapping of donor id to a matplotlib color. Required.
+    figsize : tuple
+    ylabel : str or None
+        Defaults to value_col when not given.
+    title : str or None
+    box_color : color
+        Fill color for the box. Default "0.85", the neutral gray used for
+        the existing tissue boxplots.
+    jitter : float
+        Horizontal jitter passed to seaborn's stripplot.
+    point_size : float
+        Marker size for the individual points (stripplot's `s`).
+    showfliers : bool
+        Whether the boxplot marks outlier points on its own, in addition
+        to the stripplot's points. Default False, since the stripplot
+        already shows every value.
+    reference_df : DataFrame or None
+        A second dataframe (same required columns as df) to draw
+        horizontal reference lines from, one per distinct value of
+        reference_group_col (e.g. the LN samples, when df is restricted to
+        Spleen). Each line is the median of value_col for that group.
+        Default None draws no reference lines.
+    reference_group_col : str
+        Column in reference_df to group by for the reference medians.
+        Default "tissue". Ignored when reference_df is None.
+    reference_color : color
+        Color for reference lines and their labels. Default "gray".
+        Ignored when reference_df is None.
+    """
+    required = {value_col, "donor", x}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    if donor_colors is None:
+        raise ValueError("donor_colors is required (mapping of donor id to color).")
+
+    if ylabel is None:
+        ylabel = value_col
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    sns.boxplot(
+        data=df, x=x, y=value_col, order=order,
+        color=box_color, showfliers=showfliers, ax=ax,
+    )
+    sns.stripplot(
+        data=df, x=x, y=value_col, order=order,
+        hue="donor", palette=donor_colors, legend=False,
+        jitter=jitter, s=point_size, ax=ax,
+    )
+
+    if reference_df is not None:
+        if reference_group_col not in reference_df.columns:
+            raise ValueError(
+                f"reference_df is missing reference_group_col "
+                f"'{reference_group_col}'."
+            )
+        ref_group_values = sorted(reference_df[reference_group_col].unique())
+        ref_points = []
+        for group_val in ref_group_values:
+            ref_vals = reference_df.loc[
+                reference_df[reference_group_col] == group_val, value_col
+            ]
+            if ref_vals.empty:
+                continue
+            median_val = ref_vals.median()
+            ref_points.append((group_val, median_val))
+            ax.axhline(
+                median_val, color=reference_color, linewidth=1.2,
+                linestyle="-", zorder=1,
+            )
+
+        if ref_points:
+            # Same label-spacing convention as plot_celltype_stripplot's
+            # reference lines: nudge labels apart vertically when two
+            # medians land close together, without moving the lines
+            # themselves.
+            ref_points.sort(key=lambda p: p[1])
+            y_span = np.ptp(ax.get_ylim()) or 1.0
+            min_gap = y_span * 0.06
+            label_positions = _spread_positions(
+                [val for _, val in ref_points], min_gap,
+            )
+            for (group_val, _), label_y in zip(ref_points, label_positions):
+                ax.text(
+                    1.02, label_y, str(group_val),
+                    transform=ax.get_yaxis_transform(),
+                    va="center", ha="left",
+                    fontsize=7, color=reference_color,
+                    clip_on=False,
+                )
+
+    handles = [
+        plt.Line2D(
+            [0], [0], marker="o", color="white", markerfacecolor=color,
+            markersize=8, label=donor,
+        )
+        for donor, color in donor_colors.items()
+    ]
+    ax.legend(
+        handles=handles, loc="upper left", bbox_to_anchor=(1.0, 1.0),
+        frameon=False, title="Donor",
+    )
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(False)
+    ax.set_ylabel(ylabel)
+    ax.set_xlabel(None)
+    if title is not None:
+        ax.set_title(title)
+
+    plt.tight_layout()
+    plt.show()
