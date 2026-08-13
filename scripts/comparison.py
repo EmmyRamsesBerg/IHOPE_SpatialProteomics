@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from scipy.stats import mannwhitneyu
+from scipy.stats import mannwhitneyu, spearmanr
 
 # Label formatting
 
@@ -1765,3 +1765,351 @@ def plot_value_boxstrip_with_reference(
 
     plt.tight_layout()
     plt.show()
+
+# Within-donor tissue correlation scatter
+
+def _pool_donor_tissue(df, donors, tissue_x, tissue_y):
+    """
+    Average sample-level pct_total to one value per (donor, tissue, cell_type).
+
+    Same averaging convention as df_tissue in the notebook (mean across
+    replicate pieces, not a cell-count weighted pool), so a donor that
+    happens to have more ROI pieces for one tissue does not dominate.
+    Levels are not filtered here, every cell_type row (type, intermediate
+    and subtype) is kept, because normalise_to_parent needs the parent
+    rows (e.g. "T", "CD4_T") alongside the children to compute ratios.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Combined long dataframe, must contain
+        ['donor', 'tissue', 'cell_type', 'pct_total'].
+    donors : list[str]
+        Donor ids to keep (e.g. ["IHOPE14", "IHOPE39"]).
+    tissue_x, tissue_y : str
+        The two tissue values to keep (e.g. "MedLN", "MesLN").
+
+    Returns
+    -------
+    DataFrame with columns ['donor', 'tissue', 'cell_type', 'pct_total'],
+    one row per (donor, tissue, cell_type) actually present.
+    """
+    required = {"donor", "tissue", "cell_type", "pct_total"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    sub = df[df["donor"].isin(donors) & df["tissue"].isin([tissue_x, tissue_y])]
+    return (
+        sub.groupby(["donor", "tissue", "cell_type"], as_index=False)
+        .agg(pct_total=("pct_total", "mean"))
+    )
+
+
+def plot_tissue_correlation_scatter(
+    df,
+    donors,
+    tissue_x="MedLN",
+    tissue_y="MesLN",
+    parent_of=None,
+    root_children=None,
+    cell_types=None,
+    palette=None,
+    display_names=None,
+    scale="linear",
+    size_by_abundance=True,
+    size_range=(25, 260),
+    point_size=70,
+    axis_label="% of parent population",
+    figsize=None,
+    title=None,
+):
+    """
+    Scatterplot correlating cell type frequency between two tissues, one
+    panel per donor, each point a cell type.
+
+    This is a within-donor comparison, not a between-donor one: each panel
+    plots that single donor's tissue_x value against its tissue_y value
+    for every cell type, so it asks "does this donor's subset composition
+    look similar in MedLN and MesLN", separately for each donor. It does
+    not pool or average across donors anywhere.
+
+    Values plotted are parent-relative percentages (percentage of the
+    cell type's immediate parent population, e.g. TEM_CD4 as a percentage
+    of CD4_T, or CD4_T as a percentage of T), computed with
+    normalise_to_parent on donor/tissue-averaged data, the same ratio used
+    by the parent-relative heatmaps and stripplots elsewhere in this
+    module. This keeps every point on a comparable 0-100 scale regardless
+    of how rare its lineage is overall.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Combined long dataframe (the `df` built by load_celltype_summaries
+        plus donor/tissue columns in the notebook). Must contain
+        ['donor', 'tissue', 'cell_type', 'pct_total']. Pass the full,
+        unfiltered dataframe (all levels), not a subtype-only slice, since
+        normalise_to_parent needs the parent rows at every level to
+        resolve the ratios; use `cell_types` below to restrict which rows
+        are actually plotted.
+    donors : list[str]
+        Donor ids to plot, one panel each, in this order (e.g.
+        ["IHOPE14", "IHOPE39"]). Each donor must have both tissue_x and
+        tissue_y present in df, otherwise a ValueError is raised naming
+        the donor and the missing tissue.
+    tissue_x, tissue_y : str
+        Tissue values to compare. Default "MedLN" (x-axis) vs "MesLN"
+        (y-axis).
+    parent_of : dict[str, str]
+        Same child-to-parent mapping used by normalise_to_parent (e.g.
+        the `parent_of` dict defined in the notebook). Required.
+    root_children : list[str]
+        Same top-level cell types with no single parent row, passed to
+        normalise_to_parent (e.g. `immune_types` in the notebook).
+        Required.
+    cell_types : list[str] or None
+        Restrict the plotted points to this list of cell_type names (e.g.
+        just the subtype-level entries of parent_of, to exclude the
+        intermediate-level ratios like CD4_T/T). When None (default),
+        every row normalise_to_parent returns is plotted, which mixes
+        intermediate and subtype level ratios in the same panel; for a
+        subtype-only plot pass the subtype names explicitly since level
+        information does not survive the pivot to parent_of ratios.
+    palette : dict[str, color] or None
+        {cell_type: color} mapping, e.g. the `celltype_colors` dict in the
+        notebook. Cell types being plotted but missing from palette are
+        assigned a color from a tab20 fallback, and the (possibly
+        extended) palette is returned so it can be reused in a later call,
+        same convention as plot_celltype_stacked_barplot's palette
+        parameter. When None, a fresh tab20 palette is generated for all
+        plotted cell types.
+    display_names : dict[str, str] or None
+        Optional cell_type to display-name map for the legend, e.g.
+        `celltype_display` in the notebook. Cell types not listed fall
+        back to underscores replaced by spaces.
+    scale : "linear" or "log"
+        Axis scale, applied to both axes of every panel. In "log" mode,
+        points with a zero value on either axis for that donor are
+        dropped before plotting and before the Spearman calculation
+        (log of zero is undefined), so the log and linear versions can
+        show a slightly different n and rho for the same donor; this is
+        reported in each panel's annotation via n.
+    size_by_abundance : bool
+        If True (default), point area scales on a square-root axis with
+        the larger of the two tissue values for that point, so a big
+        change in a rare, low-abundance subset does not visually compete
+        with a modest change in an abundant one. The scale is shared
+        across all donor panels so point sizes are comparable
+        panel-to-panel. If False, every point uses point_size.
+    size_range : tuple
+        Min/max marker area (points^2) when size_by_abundance is True.
+    point_size : float
+        Marker area used for every point when size_by_abundance is False.
+    axis_label : str
+        Short description of the value basis appended to each axis label
+        under the tissue name, e.g. "MedLN\\n(% of parent population)".
+    figsize : tuple or None
+        Auto-computed from the number of donors when None.
+    title : str or None
+        Overall figure title (fig.suptitle).
+
+    Returns
+    -------
+    (fig, axes, summary)
+        summary is a DataFrame with one row per donor: donor, tissue_x,
+        tissue_y, n (points used), spearman_r, spearman_p. n and the
+        correlation reflect whatever `scale` was used for that call (log
+        mode drops zero points first), so the linear and log calls can
+        report slightly different numbers, by design.
+    """
+    if parent_of is None or root_children is None:
+        raise ValueError(
+            "parent_of and root_children are required (same objects used "
+            "by normalise_to_parent), so parent-relative percentages can "
+            "be computed."
+        )
+    if scale not in ("linear", "log"):
+        raise ValueError('scale must be "linear" or "log"')
+    if len(donors) == 0:
+        raise ValueError("donors must contain at least one donor id.")
+
+    def _disp(ct):
+        if display_names and ct in display_names:
+            return display_names[ct]
+        return ct.replace("_", " ")
+
+    # Donor/tissue-averaged wide matrix, then parent-relative ratios, on
+    # every level present so parent rows are available for the division.
+    pooled = _pool_donor_tissue(df, donors, tissue_x, tissue_y)
+    pooled = pooled.assign(donor_tissue=pooled["donor"] + "_" + pooled["tissue"])
+    wide = pooled.pivot_table(
+        index="cell_type", columns="donor_tissue", values="pct_total",
+        fill_value=0.0,
+    )
+    parent_matrix = normalise_to_parent(wide, parent_of, root_children)
+
+    if cell_types is not None:
+        present = [ct for ct in cell_types if ct in parent_matrix.index]
+        absent = [ct for ct in cell_types if ct not in parent_matrix.index]
+        if absent:
+            print(f"Warning: cell_types not found after parent-relative "
+                  f"filtering, skipped: {absent}")
+        parent_matrix = parent_matrix.loc[present]
+
+    # Per-donor paired (x, y) tables, correlation, and abundance for sizing.
+    donor_data = {}
+    for donor in donors:
+        col_x, col_y = f"{donor}_{tissue_x}", f"{donor}_{tissue_y}"
+        for col, tissue in ((col_x, tissue_x), (col_y, tissue_y)):
+            if col not in parent_matrix.columns:
+                raise ValueError(
+                    f"No data found for donor '{donor}' in tissue "
+                    f"'{tissue}'. Check that df contains a "
+                    f"(donor, tissue) combination for this pair."
+                )
+        sub = pd.DataFrame({
+            "cell_type": parent_matrix.index,
+            "x": parent_matrix[col_x].to_numpy(),
+            "y": parent_matrix[col_y].to_numpy(),
+        }).dropna(subset=["x", "y"])  # undefined ratio (absent parent)
+
+        if scale == "log":
+            sub = sub[(sub["x"] > 0) & (sub["y"] > 0)]
+
+        sub["abundance"] = sub[["x", "y"]].max(axis=1)
+
+        if len(sub) >= 2:
+            rho, pval = spearmanr(sub["x"], sub["y"])
+        else:
+            rho, pval = np.nan, np.nan
+
+        donor_data[donor] = {"data": sub, "rho": rho, "pval": pval}
+
+    # Palette: fill in any plotted cell type missing from the supplied
+    # palette, same fallback convention as plot_celltype_stacked_barplot.
+    plotted_cts = sorted(set().union(*[
+        donor_data[d]["data"]["cell_type"] for d in donors
+    ])) if any(len(donor_data[d]["data"]) for d in donors) else []
+    if palette is None:
+        colors = sns.color_palette("tab20", n_colors=max(len(plotted_cts), 1))
+        palette = dict(zip(plotted_cts, colors))
+    else:
+        missing_cts = [ct for ct in plotted_cts if ct not in palette]
+        if missing_cts:
+            new_colors = sns.color_palette("tab20", n_colors=len(missing_cts))
+            for ct, col in zip(missing_cts, new_colors):
+                palette[ct] = col
+
+    # Shared sizing scale (sqrt of abundance) across every donor panel, so
+    # a given subset's dot is the same size in both panels.
+    all_abundance = np.concatenate([
+        donor_data[d]["data"]["abundance"].to_numpy() for d in donors
+    ]) if plotted_cts else np.array([0.0])
+    all_abundance = all_abundance[np.isfinite(all_abundance)]
+    amin = np.sqrt(max(all_abundance.min(), 0)) if all_abundance.size else 0.0
+    amax = np.sqrt(all_abundance.max()) if all_abundance.size else 1.0
+
+    def _size(a):
+        if not size_by_abundance:
+            return point_size
+        if not np.isfinite(a) or amax <= amin:
+            return np.mean(size_range)
+        frac = (np.sqrt(max(a, 0)) - amin) / (amax - amin)
+        return size_range[0] + frac * (size_range[1] - size_range[0])
+
+    # Shared axis limits across all donor panels, so the panels are
+    # visually comparable and the unity line sits identically in each.
+    all_vals = np.concatenate([
+        np.concatenate([
+            donor_data[d]["data"]["x"].to_numpy(),
+            donor_data[d]["data"]["y"].to_numpy(),
+        ])
+        for d in donors
+    ]) if plotted_cts else np.array([0.0, 1.0])
+    if scale == "linear":
+        lo = 0.0
+        hi = max(float(np.nanmax(all_vals)) * 1.08, 1.0) if all_vals.size else 1.0
+    else:
+        positive = all_vals[all_vals > 0]
+        lo = float(positive.min()) / 1.5 if positive.size else 0.1
+        hi = float(positive.max()) * 1.5 if positive.size else 10.0
+
+    if figsize is None:
+        figsize = (5.2 * len(donors) + 1.5, 5.2)
+
+    fig, axes = plt.subplots(1, len(donors), figsize=figsize, squeeze=False)
+    axes = axes[0]
+    fig.patch.set_facecolor("white")
+
+    summary_rows = []
+    for ax, donor in zip(axes, donors):
+        sub = donor_data[donor]["data"]
+        rho, pval = donor_data[donor]["rho"], donor_data[donor]["pval"]
+
+        ax.plot([lo, hi], [lo, hi], linestyle="--", color="0.6",
+                linewidth=1.0, zorder=1)
+
+        colors = [palette.get(ct, "0.5") for ct in sub["cell_type"]]
+        sizes = [_size(a) for a in sub["abundance"]]
+        ax.scatter(
+            sub["x"], sub["y"], c=colors, s=sizes,
+            edgecolor="white", linewidth=0.6, zorder=3,
+        )
+
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        if scale == "log":
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+        ax.set_aspect("equal", adjustable="box")
+
+        if np.isnan(rho):
+            annot = f"n = {len(sub)} (too few points for correlation)"
+        else:
+            annot = f"Spearman r = {rho:.2f}\np = {pval:.3f}, n = {len(sub)}"
+        ax.text(
+            0.04, 0.96, annot, transform=ax.transAxes,
+            va="top", ha="left", fontsize=9, color="black",
+        )
+
+        ax.set_title(donor, fontsize=11, color="black")
+        ax.set_xlabel(f"{tissue_x}\n({axis_label})", color="black")
+        ax.set_ylabel(f"{tissue_y}\n({axis_label})", color="black")
+        ax.tick_params(axis="both", colors="black")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["bottom"].set_color("black")
+        ax.spines["left"].set_color("black")
+        ax.grid(False)
+        ax.set_facecolor("white")
+
+        summary_rows.append({
+            "donor": donor, "tissue_x": tissue_x, "tissue_y": tissue_y,
+            "n": len(sub), "spearman_r": rho, "spearman_p": pval,
+        })
+
+    legend_cts = (
+        [ct for ct in cell_types if ct in plotted_cts]
+        if cell_types is not None else plotted_cts
+    )
+    handles = [
+        plt.Line2D(
+            [0], [0], marker="o", color="white", linestyle="None",
+            markerfacecolor=palette.get(ct, "0.5"), markeredgecolor="none",
+            markersize=8, label=_disp(ct),
+        )
+        for ct in legend_cts
+    ]
+    legend = fig.legend(
+        handles=handles, loc="upper left", bbox_to_anchor=(1.0, 1.0),
+        frameon=False, title="Cell type", labelcolor="black",
+    )
+    legend.get_title().set_color("black")
+
+    if title:
+        fig.suptitle(title, fontsize=12, color="black")
+
+    plt.tight_layout()
+    plt.show()
+
+    return fig, axes, pd.DataFrame(summary_rows)

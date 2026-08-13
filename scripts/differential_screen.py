@@ -275,6 +275,117 @@ def marker_to_donor_level(positivity_csv):
     ]
 
 
+def extract_marker_positivity_in_populations(
+    anndata_dir,
+    basenames,
+    populations,
+    suffix="_celltypes_follicledomains.h5ad",
+    pos_suffix="_pos",
+    verbose=True,
+):
+    """
+    Marker positivity conditioned on cell populations, pooled to donor level.
+
+    For each named population, the population mask is the union (logical or) of
+    the boolean one hot columns listed for it. Within that mask, every marker
+    positivity column is counted, so the fraction becomes the share of the
+    population positive for the marker rather than the share of all cells. Files
+    are opened in backed mode, so only obs is read.
+
+    populations maps a population name to a list of boolean obs columns, for
+    example {"CD8_memory": ["subtype_TCM_CD8", "subtype_TEM_CD8",
+    "subtype_TEMRA_CD8"]}. Biology lives in the notebook, this only applies the
+    masks.
+
+    No CSV is written. Returns a dict mapping each population name to a donor
+    level table shaped like marker_to_donor_level's output (level "marker",
+    cell_type the marker, pct the within population positive fraction), so the
+    same screen runs on each. When verbose, prints the population size per
+    sample so a fraction resting on few cells is visible.
+
+    The pooled donor fraction is sum of positive within population over the
+    donor's pieces, divided by the summed population size, matching the cell
+    level pooling used everywhere else.
+    """
+    import scanpy as sc
+
+    anndata_dir = Path(anndata_dir)
+    per_pop_rows = {name: [] for name in populations}
+    size_rows = []
+
+    for basename in basenames:
+        path = anndata_dir / f"{basename}{suffix}"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        adata = sc.read_h5ad(path, backed="r")
+        obs = adata.obs
+
+        pos_cols = [
+            c for c in obs.columns
+            if c.endswith(pos_suffix) and obs[c].dtype == bool
+        ]
+
+        for name, member_cols in populations.items():
+            missing = [c for c in member_cols if c not in obs.columns]
+            if missing:
+                raise ValueError(
+                    f"{basename}: population '{name}' references columns not in "
+                    f"obs: {missing}"
+                )
+            mask = np.zeros(obs.shape[0], dtype=bool)
+            for c in member_cols:
+                mask |= obs[c].to_numpy(dtype=bool)
+            pop_size = int(mask.sum())
+            size_rows.append(
+                {"sample": basename, "population": name, "n_pop_cells": pop_size}
+            )
+
+            for c in pos_cols:
+                n_pos = int((obs[c].to_numpy(dtype=bool) & mask).sum())
+                per_pop_rows[name].append({
+                    "sample": basename,
+                    "marker": c[: -len(pos_suffix)],
+                    "n_pos": n_pos,
+                    "n_cells": pop_size,
+                })
+
+        if getattr(adata, "isbacked", False):
+            adata.file.close()
+        del adata
+
+    if verbose:
+        sizes = pd.DataFrame(size_rows)
+        print("Population size per sample (cells in population):")
+        wide = sizes.pivot(index="sample", columns="population", values="n_pop_cells")
+        print(wide.to_string())
+        print()
+
+    out = {}
+    for name, rows in per_pop_rows.items():
+        df = pd.DataFrame(rows)
+        df["donor"] = df["sample"].map(_donor_from_basename)
+        df["tissue"] = df["sample"].map(_tissue_from_basename)
+        dt = (
+            df.groupby(["donor", "tissue", "marker"])[["n_pos", "n_cells"]]
+            .sum()
+            .reset_index()
+        )
+        # a donor and tissue with an empty population would divide by zero, so
+        # its fraction is left as NaN rather than forced
+        dt["pct"] = np.where(
+            dt["n_cells"] > 0, dt["n_pos"] / dt["n_cells"] * 100, np.nan
+        )
+        dt["level"] = "marker"
+        dt["cell_type"] = dt["marker"]
+        dt["column"] = dt["marker"] + "_pos"
+        dt = dt.rename(columns={"n_cells": "total_cells"})
+        out[name] = dt[
+            ["donor", "tissue", "level", "cell_type", "column",
+             "n_pos", "total_cells", "pct"]
+        ]
+    return out
+
+
 # ----------------------------------------------------------------------
 # the screen
 # ----------------------------------------------------------------------
@@ -397,7 +508,6 @@ def screen(
         # the plain difference and the log2 fold change, both group_b vs group_a
         paired = {}
         paired_log2fc = {}
-        paired_abund = {}
         for dn in paired_donors:
             av, bv = a_col.get(dn), b_col.get(dn)
             if pd.notna(av) and pd.notna(bv):
@@ -405,7 +515,6 @@ def screen(
                 paired_log2fc[dn] = float(
                     np.log2((bv + pseudocount) / (av + pseudocount))
                 )
-                paired_abund[dn] = max(float(av), float(bv))
 
         group_sign = np.sign(diff)
         agree = bool(
@@ -443,7 +552,6 @@ def screen(
         for dn in paired_donors:
             rec[f"pdiff_{dn}"] = paired.get(dn, np.nan)
             rec[f"log2fc_{dn}"] = paired_log2fc.get(dn, np.nan)
-            rec[f"abund_{dn}"] = paired_abund.get(dn, np.nan)
         records.append(rec)
 
     out = pd.DataFrame.from_records(records)
@@ -475,18 +583,6 @@ def _per_donor_cols(screen_df, metric):
     return cols, donors
 
 
-def _per_donor_abund_cols(screen_df, donor_ids):
-    """Per donor abundance column names, same order as donor_ids."""
-    cols = [f"abund_{d}" for d in donor_ids]
-    missing = [c for c in cols if c not in screen_df.columns]
-    if missing:
-        raise ValueError(
-            "points='donor' with size_by_abundance=True needs per donor "
-            f"abundance columns in the screen output: missing {missing}. "
-            "Re-run screen() so it emits abund_<donor>."
-        )
-    return cols
-
 def plot_fc_lollipop(
     screen_df,
     metric="log2fc",
@@ -503,6 +599,8 @@ def plot_fc_lollipop(
     point_size=70,
     title=None,
     figsize=None,
+    facecolor="white",
+    text_color="black",
 ):
     """
     Ranked lollipop of the screen output, one facet per level.
@@ -544,7 +642,6 @@ def plot_fc_lollipop(
             raise ValueError(f"screen_df is missing column '{col}'")
 
     per_donor_cols, donor_ids = ([], [])
-    per_donor_abund_cols = []
     if points == "donor":
         per_donor_cols, donor_ids = _per_donor_cols(screen_df, metric)
         if not per_donor_cols:
@@ -555,8 +652,6 @@ def plot_fc_lollipop(
         if donor_colors is None:
             pal = sns.color_palette("Set2", len(donor_ids))
             donor_colors = {d: pal[i] for i, d in enumerate(donor_ids)}
-        if size_by_abundance:
-            per_donor_abund_cols = _per_donor_abund_cols(screen_df, donor_ids)
 
     df = screen_df.copy()
     df["abundance"] = df[[a_mean, b_mean]].max(axis=1)
@@ -574,17 +669,9 @@ def plot_fc_lollipop(
             facet[lv] = sub
     levels_present = [lv for lv in levels_present if lv in facet]
 
-    # global square root size scaling across every shown row (and, in donor
-    # mode, every individual donor point, so the scale matches what's drawn)
-    if points == "donor" and size_by_abundance:
-        ab_all = np.concatenate([
-            facet[lv][per_donor_abund_cols].to_numpy().ravel()
-            for lv in levels_present
-        ])
-    else:
-        ab_all = np.concatenate([facet[lv]["abundance"].to_numpy() for lv in levels_present])
+    # global square root size scaling across every shown row
+    ab_all = np.concatenate([facet[lv]["abundance"].to_numpy() for lv in levels_present])
     ab_all = ab_all[np.isfinite(ab_all)]
-
     amin = np.sqrt(max(ab_all.min(), 0)) if ab_all.size else 0.0
     amax = np.sqrt(ab_all.max()) if ab_all.size else 1.0
 
@@ -615,11 +702,6 @@ def plot_fc_lollipop(
         sub = facet[lv]
         yy = np.arange(len(sub))
         sizes = np.array([_size(a) for a in sub["abundance"].to_numpy()])
-        if points == "donor" and size_by_abundance:
-            sizes_by_donor = {
-                d: np.array([_size(a) for a in sub[c].to_numpy()])
-                for d, c in zip(donor_ids, per_donor_abund_cols)
-            }
 
         ax.axvline(0, color="black", linewidth=0.8, zorder=1)
         if metric == "log2fc":
@@ -641,8 +723,7 @@ def plot_fc_lollipop(
             ax.hlines(yy, lo, hi, color="0.7", linewidth=1.0, zorder=2)
             for d in donor_ids:
                 v = donor_vals[d]
-                s = sizes_by_donor[d] if size_by_abundance else sizes
-                ax.scatter(v, yy, s=s, c=[donor_colors[d]] * len(sub),
+                ax.scatter(v, yy, s=sizes, c=[donor_colors[d]] * len(sub),
                            edgecolor="white", linewidth=0.6, zorder=3)
 
         ax.set_yticks(yy)
@@ -712,10 +793,7 @@ def plot_fc_lollipop(
             ]
 
         for i, lv in enumerate(levels_present):
-            if points == "donor":
-                fab = facet[lv][per_donor_abund_cols].to_numpy().ravel()
-            else:
-                fab = facet[lv]["abundance"].to_numpy()
+            fab = facet[lv]["abundance"].to_numpy()
             fab = fab[np.isfinite(fab)]
             if not fab.size:
                 continue
@@ -726,10 +804,36 @@ def plot_fc_lollipop(
                 handles=_size_handles(ref), loc="upper left",
                 bbox_to_anchor=(legend_x, y),
                 bbox_transform=fig.transFigure, frameon=False, fontsize=8,
-                title="abundance", title_fontsize=8,
+                title="abundance\n(larger group)", title_fontsize=8,
                 labelspacing=1.2, borderpad=0.5,
             )
 
     if title:
-        fig.suptitle(title, fontsize=12, x=0.05, ha="left")
+        suptitle = fig.suptitle(title, fontsize=12, x=0.05, ha="left")
+    else:
+        suptitle = None
+
+    # Force background and text colour explicitly so the figure does not inherit
+    # a dark notebook theme. Titles, axis labels, tick labels, spines and legend
+    # text all follow text_color; the muted grey guides and direction hints are
+    # left as they are since they read fine on a light background.
+    fig.patch.set_facecolor(facecolor)
+    for ax in axes:
+        ax.set_facecolor(facecolor)
+        ax.title.set_color(text_color)
+        ax.xaxis.label.set_color(text_color)
+        ax.yaxis.label.set_color(text_color)
+        for lbl in ax.get_xticklabels() + ax.get_yticklabels():
+            lbl.set_color(text_color)
+        for sp in ax.spines.values():
+            sp.set_color(text_color)
+    if suptitle is not None:
+        suptitle.set_color(text_color)
+    for leg in fig.legends:
+        lt = leg.get_title()
+        if lt is not None:
+            lt.set_color(text_color)
+        for t in leg.get_texts():
+            t.set_color(text_color)
+
     return fig, axes
