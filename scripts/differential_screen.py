@@ -438,7 +438,7 @@ def screen(
         tissues.
     pseudocount : float
         Added to both group means before the log2 ratio so a zero denominator
-        does not blow up. Read the plain difference alongside the fold change,
+        does not collapse the calculation. Read the plain difference alongside the fold change,
         since a rare type present in only one tissue still gives a large ratio.
     fill_absent_zero : bool or None
         Whether a feature absent for a donor and tissue counts as zero. None
