@@ -1770,11 +1770,23 @@ def plot_value_boxstrip_with_reference(
 
 def _pool_donor_tissue(df, donors, tissue_x, tissue_y):
     """
-    Average sample-level pct_total to one value per (donor, tissue, cell_type).
+    Pool sample-level cell counts to one value per (donor, tissue, cell_type),
+    then recompute pct_total from the pooled raw counts.
 
-    Same averaging convention as df_tissue in the notebook (mean across
-    replicate pieces, not a cell-count weighted pool), so a donor that
-    happens to have more ROI pieces for one tissue does not dominate.
+    Every cell_type row in the source summary CSVs carries pct_total already
+    rounded to one decimal place, which is coarse enough to flatten real
+    differences between rare subtypes: in a large sample, two subtypes with
+    meaningfully different n_cells can round to the identical displayed
+    percentage. Averaging those pre-rounded values (the previous behaviour
+    here) propagates that precision loss into the parent-relative ratios and
+    the scatter plot. This pools at the cell-count level instead, summing
+    n_cells and total_cells separately across a donor's replicate pieces for
+    a tissue and only then dividing, the same convention pool_to_donor_level
+    in differential_screen.py uses. That also weights each piece by how many
+    cells it actually contributed, rather than treating (for example) a
+    279-cell piece and a 2361-cell piece as equally informative, which a
+    plain mean of percentages would otherwise do.
+
     Levels are not filtered here, every cell_type row (type, intermediate
     and subtype) is kept, because normalise_to_parent needs the parent
     rows (e.g. "T", "CD4_T") alongside the children to compute ratios.
@@ -1783,7 +1795,7 @@ def _pool_donor_tissue(df, donors, tissue_x, tissue_y):
     ----------
     df : DataFrame
         Combined long dataframe, must contain
-        ['donor', 'tissue', 'cell_type', 'pct_total'].
+        ['donor', 'tissue', 'cell_type', 'n_cells', 'total_cells'].
     donors : list[str]
         Donor ids to keep (e.g. ["IHOPE14", "IHOPE39"]).
     tissue_x, tissue_y : str
@@ -1792,18 +1804,39 @@ def _pool_donor_tissue(df, donors, tissue_x, tissue_y):
     Returns
     -------
     DataFrame with columns ['donor', 'tissue', 'cell_type', 'pct_total'],
-    one row per (donor, tissue, cell_type) actually present.
+    one row per (donor, tissue, cell_type) actually present, pct_total
+    recomputed at full precision from the pooled counts.
     """
-    required = {"donor", "tissue", "cell_type", "pct_total"}
+    required = {"donor", "tissue", "cell_type", "n_cells", "total_cells"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
 
     sub = df[df["donor"].isin(donors) & df["tissue"].isin([tissue_x, tissue_y])]
-    return (
-        sub.groupby(["donor", "tissue", "cell_type"], as_index=False)
-        .agg(pct_total=("pct_total", "mean"))
+
+    # total_cells is a per-sample constant, the same number repeated on
+    # every cell_type row within that sample, so it has to be deduplicated
+    # to one row per sample before summing across a donor's pieces for a
+    # tissue, otherwise it would be counted once per cell_type row instead
+    # of once per sample.
+    sample_totals = sub.drop_duplicates("sample")[
+        ["donor", "tissue", "sample", "total_cells"]
+    ]
+    dt_totals = (
+        sample_totals.groupby(["donor", "tissue"])["total_cells"]
+        .sum()
+        .rename("pooled_total")
+        .reset_index()
     )
+
+    pooled_n = (
+        sub.groupby(["donor", "tissue", "cell_type"], as_index=False)["n_cells"]
+        .sum()
+    )
+
+    out = pooled_n.merge(dt_totals, on=["donor", "tissue"], how="left")
+    out["pct_total"] = out["n_cells"] / out["pooled_total"] * 100
+    return out[["donor", "tissue", "cell_type", "pct_total"]]
 
 
 def plot_tissue_correlation_scatter(
