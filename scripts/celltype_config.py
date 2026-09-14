@@ -1,10 +1,10 @@
 """
 celltype_config.py
 
-This module  holds display and bookkeeping metadata shared across the
-IHOPE notebooks: which sample is which donor/tissue,
-what order things should be plotted in,
-what each cell type should be called and colored.
+This module holds display and bookkeeping metadata shared across
+the IHOPE notebooks: which sample is which donor/tissue, what order
+things should be plotted in, what each cell type should be called
+and colored.
 
 Import only what a given notebook needs, for example
 
@@ -20,7 +20,7 @@ Import only what a given notebook needs, for example
 
 # (file_basename, input_suffix, out_basename) used by the batch cell typing
 # and BANKSY notebooks. file_basename + input_suffix is the name used to
-# find the input CSV. out_basename is the name used for all
+# find the input CSV on disk. out_basename is the name used for all
 # outputs from that sample onward.
 SAMPLES = [
     ("IHOPE14_MedLN_BottomLeft",  "_cleaned_filtered",        "IHOPE14_MedLN_BottomLeft"),
@@ -41,7 +41,7 @@ SAMPLES = [
 
 # Manual display order for sample columns in the follicle-counting bar
 # plots, and for the per-sample follicle-size strip/box plots. Grouped by
-# donor within tissue.
+# donor within tissue, matching SAMPLES above rather than alphabetical.
 SAMPLE_ORDER = [
     "IHOPE14_MedLN_BottomLeft",
     "IHOPE14_MedLN_BottomRight",
@@ -59,9 +59,9 @@ SAMPLE_ORDER = [
     "IHOPE39_Spleen",
 ]
 
-# filename, display sample name. The sample
-# comparison/SVG export notebooks base donor_map and tissue_map (below)
-# on these display names, since that's what load_celltype_summaries
+# celltype_summary_<x>.csv filename -> display sample name. The sample
+# comparison / SVG export notebooks key donor_map and tissue_map (below)
+# off these display names, since that's what load_celltype_summaries
 # labels the "sample" column with.
 NAME_MAP = {
     "celltype_summary_IHOPE14_MedLN_BottomLeft.csv": "IHOPE14 MedLN Bottom Left",
@@ -80,8 +80,8 @@ NAME_MAP = {
     "celltype_summary_IHOPE39_Spleen.csv": "IHOPE39 Spleen",
 }
 
-# Display sample name, donor id. Used wherever df["sample"] holds the
-# NAME_MAP display names (comparison/SVG export notebooks).
+# Display sample name -> donor id. Used wherever df["sample"] holds the
+# NAME_MAP display names (comparison / SVG export notebooks).
 DONOR_MAP = {
     "IHOPE14 MedLN Bottom Left": "IHOPE14",
     "IHOPE14 MedLN Bottom Right": "IHOPE14",
@@ -99,7 +99,7 @@ DONOR_MAP = {
     "IHOPE39 Spleen": "IHOPE39",
 }
 
-# Display sample name, tissue
+# Display sample name -> tissue. Same key space as DONOR_MAP.
 TISSUE_MAP = {
     "IHOPE14 MedLN Bottom Left": "MedLN",
     "IHOPE14 MedLN Bottom Right": "MedLN",
@@ -117,9 +117,9 @@ TISSUE_MAP = {
     "IHOPE39 Spleen": "Spleen",
 }
 
-# basename (as used for h5ad/follicle-counting files, e.g.
+# basename (as used for h5ad / follicle-counting files, e.g.
 # "IHOPE14_MedLN_BottomLeft") -> donor id / tissue. Same information as
-# DONOR_MAP/TISSUE_MAP above, but based on the underscore-joined
+# DONOR_MAP / TISSUE_MAP above, but keyed by the underscore-joined
 # basename rather than the display name, for the notebooks that work
 # directly from file basenames (follicle counting, follicle-count section
 # of the SVG export notebook).
@@ -157,13 +157,13 @@ BASENAME_TISSUE_MAP = {
     "IHOPE39_Spleen": "Spleen",
 }
 
-# Manual display order for tissue groups, used where a plot groups by tissue.
+# Manual display order for tissue groups, everywhere a plot groups by tissue.
 TISSUE_ORDER = ["MedLN", "MesLN", "Spleen"]
 
 
 # Cell type metadata
 
-# Structural/non-immune cell types, dropped when immune_only=True.
+# Structural / non-immune cell types, dropped when immune_only=True.
 STRUCTURAL_CELL_TYPES = [
     "Blood_Endothelial",
     "Lymphatic_Endothelial",
@@ -236,11 +236,14 @@ PARENT_OF = {
     "Monocyte_Macrophage": "Myeloid", "cDC1": "Myeloid", "cDC2": "Myeloid",
 }
 
-# Immune only with no unannotated cells.
+# Root level. No single "Immune" row exists, so the denominator is the sum
+# of these type-level rows, which is exactly total immune because the type
+# level is a strict partition. Stromal, Endothelial and unclassified are
+# excluded, so this is immune only with no unannotated cells.
 IMMUNE_TYPES = ["T", "B", "NK", "Myeloid"]
 
 # Display names for the parent-relative heatmap/facet row labels. Each row
-# is labelled "child/parent" (e.g. "CD4 T cells/T cells").
+# is labelled "child / parent" (e.g. "CD4 T cells / T cells").
 CELLTYPE_DISPLAY = {
     "T": "T cells", "B": "B cells", "NK": "NK cells", "Myeloid": "Myeloid cells",
     "CD4_T": "CD4 T cells", "CD8_T": "CD8 T cells",
@@ -290,10 +293,10 @@ CELLTYPE_COLORS = {
     "TEMRA_CD4": "#c5b0d5",
     "Activated_CD4": "#ad494a",
     "Treg": "#843c39",
-    "TfH_like": "#e7298a",
+    "TfH_like": "#e7298a",      # follicular, given a standout magenta
 
     # subtype level, CD8 T cells
-    "TN_CD8": "#fdd0a2",
+    "TN_CD8": "#fdd0a2",        # changed from #ff7f0e to clear the collision
     "TCM_CD8": "#ffbb78",
     "TEM_CD8": "#bcbd22",
     "TEMRA_CD8": "#dbdb8d",
