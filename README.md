@@ -1,17 +1,15 @@
 # IHOPE Spatial Proteomics Analysis
 
-This is a workflow for spatial proteomics analysis of human lymphoid tissue under the IHOPE project. 
-Here, a 37-marker plus DAPI panel was imaged on the PhenoCycler Fusion (Akoya Biosciences) platform.
-There were 14 samples from 5 donors.
-Tissues: mediastinal lymph node (MedLN), mesenteric lymph node (MesLN), spleen
+This is a workflow for spatial proteomics analysis of human lymphoid tissue under the IHOPE project. A 37-marker plus DAPI panel was imaged on the PhenoCycler Fusion (Akoya Biosciences) platform, across 14 samples from 5 donors. Tissues: mediastinal lymph node (MedLN), mesenteric lymph node (MesLN), spleen.
 
-## Pipeline overview
+To use this workflow, download or clone the repository to get the folder structure, scripts, and notebooks as described below. Before running anything, edit scripts/celltype_config.py to match your own sample and file naming, since this file controls the sample list, paths, and metadata used throughout the workflow.
+## Workflow overview
 
-- Step 0 (before this workflow): segmentation with InstanSeg in QuPath, one CSV per sample 
+- (Step 0: segmentation with InstanSeg in QuPath, one CSV per sample/ROI) 
 - Step 1: preprocessing, drop unused columns, filter to 1st to 99th percentile DAPI intensity, keep cells 20 to 200 square micrometers
 - Step 2: normalization, z-score after log2 transform (optional, can also use arcsinh or none)
 - Step 3: build AnnData object
-- Step 4: marker positivity thresholds, 2-component GMM or percentile cutoff, chosen per marker based on BIC
+- Step 4: marker positivity thresholding, 2-component GMM or percentile cutoff, chosen per marker based on BIC
 - Step 5: rule-based cell typing using cell type marker positivity/negativity from canonical immunology 
 - Step 6: BANKSY spatial domain analysis, then manual annotation of B cell dense domains as follicles
 - Step 7: spatially constrained cell types added (TfH and GC B inside follicle domains, plasmablasts outside)
@@ -46,15 +44,15 @@ IHOPE_SpatialProteomics/
 │   ├── differential_screen.py
 │   └── spatial_plotting.py
 ├── data/                   
-│   ├── raw/                # Segmented PhenoCycler data in CSV format
-│   └── processed/          # Cleaned and filtered data  
+│   ├── raw/    # Segmented PhenoCycler data in CSV format – add here!
+│   └── processed/           
 │       └── anndata/        
-│           └── zscore_log2/
+│           └── zscore_log2/    # Or similar 
 │               └── celltyped/
 │                   └── follicledomains/
 └── results/
     ├── reports/
-    │   ├── zscore_log2/
+    │   ├── zscore_log2/        # Or similar
     │   └── follicle_counts/
     └── figures/
         └── vector/
