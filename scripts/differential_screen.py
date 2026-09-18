@@ -213,9 +213,17 @@ def extract_marker_positivity(
     out_csv = Path(out_csv)
     frames = []
     for basename in basenames:
-        path = anndata_dir / f"{basename}{suffix}"
-        if not path.exists():
-            raise FileNotFoundError(path)
+        matches = sorted(anndata_dir.glob(f"{basename}*{suffix}"))
+        if not matches:
+            raise FileNotFoundError(
+                f"No file matching '{basename}*{suffix}' in {anndata_dir}"
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                f"Ambiguous match for basename '{basename}' in {anndata_dir}: "
+                f"{[m.name for m in matches]}"
+            )
+        path = matches[0]
         adata = sc.read_h5ad(path, backed="r")
         obs = adata.obs
         n_cells = int(obs.shape[0])
@@ -314,9 +322,17 @@ def extract_marker_positivity_in_populations(
     size_rows = []
 
     for basename in basenames:
-        path = anndata_dir / f"{basename}{suffix}"
-        if not path.exists():
-            raise FileNotFoundError(path)
+        matches = sorted(anndata_dir.glob(f"{basename}*{suffix}"))
+        if not matches:
+            raise FileNotFoundError(
+                f"No file matching '{basename}*{suffix}' in {anndata_dir}"
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                f"Ambiguous match for basename '{basename}' in {anndata_dir}: "
+                f"{[m.name for m in matches]}"
+            )
+        path = matches[0]
         adata = sc.read_h5ad(path, backed="r")
         obs = adata.obs
 
